@@ -64,13 +64,27 @@ struct SocialButton: View {
     }
 }
 
-// MARK: - Apple & Google icon views
+// MARK: - Apple, Google & Facebook icon views
 struct AppleSignInIcon: View {
     var color: Color = .primary
     var body: some View {
         Image(systemName: "apple.logo")
             .font(.system(size: 16, weight: .medium))
             .foregroundStyle(color)
+    }
+}
+
+struct FacebookSignInIcon: View {
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color(hex: "#1877F2"))
+            Text("f")
+                .font(.system(size: 13, weight: .heavy))
+                .foregroundStyle(.white)
+                .offset(x: 0.5)
+        }
+        .frame(width: 18, height: 18)
     }
 }
 

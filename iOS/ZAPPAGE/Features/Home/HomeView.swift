@@ -97,7 +97,7 @@ private struct HomeBrandBar: View {
 
     var body: some View {
         HStack {
-            ZapWordmark(size: 26, textColor: tone.text, accent: accent)
+            ZapWordmark(size: 28, textColor: tone.text, accent: accent, letterSpacing: -1.5)
             Spacer()
             // Avatar button — accent bg when open, chipBg when closed
             Button { withAnimation(.easeOut(duration: 0.14)) { menuOpen.toggle() } } label: {

@@ -98,6 +98,9 @@ struct AuthView: View {
                              text: $vm.username,
                              tone: tone, accent: accent)
                 .transition(.opacity.combined(with: .move(edge: .top)))
+
+                HeroPickerRow(selected: $vm.selectedHero, label: s.chooseYourHero, tone: tone, accent: accent)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             ZapTextField(icon: "envelope",
@@ -169,8 +172,8 @@ struct AuthView: View {
     // MARK: - Social buttons
     private var socialRow: some View {
         HStack(spacing: 10) {
-            SocialButton(icon: AnyView(AppleSignInIcon(color: tone.text)), label: "Apple", tone: tone) {
-                vm.signInWithApple(); onAuthenticated?()
+            SocialButton(icon: AnyView(FacebookSignInIcon()), label: "Facebook", tone: tone) {
+                vm.signInWithFacebook(); onAuthenticated?()
             }
             SocialButton(icon: AnyView(GoogleSignInIcon()), label: "Google", tone: tone) {
                 vm.signInWithGoogle(); onAuthenticated?()
@@ -283,6 +286,241 @@ private struct AuthTabToggle: View {
         .background(tone.chipBg)
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(tone.chipBorder, lineWidth: 0.5))
+    }
+}
+
+// MARK: - Hero picker
+private struct HeroPickerRow: View {
+    @Binding var selected: ZapTheme.HeroKind
+    let label: String
+    let tone: ZapTheme.Tone
+    let accent: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(label)
+                .font(ZapTheme.archivoBlack(11))
+                .kerning(0.8)
+                .foregroundStyle(tone.textDim)
+
+            HStack(spacing: 8) {
+                ForEach(ZapTheme.HeroKind.allCases, id: \.self) { hero in
+                    HeroOption(hero: hero, selected: $selected, accent: accent)
+                }
+            }
+        }
+        .padding(.top, 4)
+    }
+}
+
+private struct HeroOption: View {
+    let hero: ZapTheme.HeroKind
+    @Binding var selected: ZapTheme.HeroKind
+    let accent: Color
+
+    private var isSelected: Bool { hero == selected }
+
+    var body: some View {
+        Button {
+            withAnimation(.spring(response: 0.25, dampingFraction: 0.75)) { selected = hero }
+        } label: {
+            VStack(spacing: 6) {
+                ZStack {
+                    LinearGradient(colors: [hero.bgFrom, hero.bgTo],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+                    HeroCardParticles(hero: hero)
+                    ChibiHero(kind: hero, accent: accent, size: 58)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 80)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(isSelected ? accent : Color.white.opacity(0.08), lineWidth: isSelected ? 2 : 0.5)
+                )
+                .scaleEffect(isSelected ? 1.04 : 1.0)
+                .shadow(color: isSelected ? accent.opacity(0.45) : .black.opacity(0.35),
+                        radius: isSelected ? 10 : 4, x: 0, y: 4)
+
+                VStack(spacing: 1) {
+                    Text(hero.displayName)
+                        .font(ZapTheme.archivoBlack(10))
+                        .kerning(0.5)
+                        .foregroundStyle(isSelected ? accent : Color(hex: "#FAFAFA").opacity(0.5))
+
+                    Text(hero.roleLabel)
+                        .font(.system(size: 8, weight: .medium))
+                        .kerning(0.3)
+                        .foregroundStyle(isSelected ? accent.opacity(0.7) : Color(hex: "#FAFAFA").opacity(0.3))
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Hero card particle overlays (live-animated via TimelineView)
+private struct HeroCardParticles: View {
+    let hero: ZapTheme.HeroKind
+
+    // Each hero gets a vivid, on-theme particle colour visible on dark backgrounds
+    private var pc: Color {
+        switch hero {
+        case .zap:   return Color(hex: "#FFD84D")  // electric gold
+        case .bolt:  return Color(hex: "#7EC0FF")  // arc blue
+        case .nyx:   return Color(hex: "#C9A8FF")  // mystic lavender
+        case .ember: return Color(hex: "#FF7B3A")  // fire orange
+        }
+    }
+
+    var body: some View {
+        TimelineView(.animation) { tl in
+            Canvas { ctx, size in
+                let t = tl.date.timeIntervalSinceReferenceDate
+                switch hero {
+                case .zap:   drawLightning(ctx, size, t)
+                case .bolt:  drawSparks(ctx, size, t)
+                case .nyx:   drawStarbursts(ctx, size, t)
+                case .ember: drawFlames(ctx, size, t)
+                }
+            }
+        }
+    }
+
+    // ZAP — large flickering lightning bolts, each strobes independently
+    private func drawLightning(_ ctx: GraphicsContext, _ size: CGSize, _ t: Double) {
+        let spots: [(CGFloat, CGFloat)] = [(0.12, 0.12), (0.80, 0.08), (0.88, 0.58), (0.20, 0.75), (0.52, 0.28)]
+        for (i, (rx, ry)) in spots.enumerated() {
+            let fi  = Double(i)
+            let raw = sin(t * (3.8 + fi * 0.9) + fi * 2.1)
+            let opacity = raw > 0.15 ? min(0.95, 0.9 * raw) : 0
+            guard opacity > 0 else { continue }
+            let x = rx * size.width, y = ry * size.height
+            var bolt = Path()
+            bolt.move(to:    CGPoint(x: x + 3,   y: y))
+            bolt.addLine(to: CGPoint(x: x - 1.5, y: y + 4))
+            bolt.addLine(to: CGPoint(x: x + 1.5, y: y + 4))
+            bolt.addLine(to: CGPoint(x: x - 3,   y: y + 9))
+            ctx.stroke(bolt, with: .color(pc.opacity(opacity)),
+                       style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+        }
+    }
+
+    // BOLT — pulsing 8-ray spark bursts, clearly visible
+    private func drawSparks(_ ctx: GraphicsContext, _ size: CGSize, _ t: Double) {
+        let spots: [(CGFloat, CGFloat, CGFloat)] = [(0.12, 0.14, 5.5), (0.83, 0.11, 5.0), (0.76, 0.70, 6.0), (0.20, 0.76, 4.5), (0.50, 0.38, 5.0)]
+        for (i, (rx, ry, baseLen)) in spots.enumerated() {
+            let fi      = Double(i)
+            let pulse   = 0.65 + 0.35 * sin(t * (2.2 + fi * 0.5) + fi * 1.7)
+            let opacity = max(0, 0.5 + 0.35 * sin(t * (1.5 + fi * 0.4) + fi * 0.9))
+            let len     = baseLen * CGFloat(pulse)
+            let x = rx * size.width, y = ry * size.height
+            // centre dot
+            ctx.fill(Path(ellipseIn: CGRect(x: x - 1.2, y: y - 1.2, width: 2.4, height: 2.4)),
+                     with: .color(pc.opacity(opacity)))
+            for j in 0..<8 {
+                let angle = CGFloat(j) * .pi / 4
+                var ray = Path()
+                ray.move(to:    CGPoint(x: x + cos(angle) * 1.8, y: y + sin(angle) * 1.8))
+                ray.addLine(to: CGPoint(x: x + cos(angle) * len, y: y + sin(angle) * len))
+                ctx.stroke(ray, with: .color(pc.opacity(opacity)),
+                           style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
+            }
+        }
+    }
+
+    // NYX — twinkling 4-point crosshair stars, highly visible
+    private func drawStarbursts(_ ctx: GraphicsContext, _ size: CGSize, _ t: Double) {
+        let spots: [(CGFloat, CGFloat, CGFloat)] = [(0.10, 0.11, 4.5), (0.86, 0.13, 3.5), (0.78, 0.68, 4.5), (0.18, 0.76, 4.0), (0.48, 0.33, 3.0), (0.63, 0.19, 3.0)]
+        for (i, (rx, ry, baseR)) in spots.enumerated() {
+            let fi      = Double(i)
+            let twinkle = 0.5 * (1 + sin(t * (1.2 + fi * 0.35) + fi * 2.5))
+            let r       = baseR * CGFloat(0.35 + 0.65 * twinkle)
+            let opacity = 0.25 + 0.55 * twinkle
+            let x = rx * size.width, y = ry * size.height
+            // long arms
+            var star = Path()
+            star.move(to: CGPoint(x: x,       y: y - r));     star.addLine(to: CGPoint(x: x,       y: y + r))
+            star.move(to: CGPoint(x: x - r,   y: y));         star.addLine(to: CGPoint(x: x + r,   y: y))
+            // short diagonal arms
+            let d = r * 0.52
+            star.move(to: CGPoint(x: x - d, y: y - d)); star.addLine(to: CGPoint(x: x + d, y: y + d))
+            star.move(to: CGPoint(x: x + d, y: y - d)); star.addLine(to: CGPoint(x: x - d, y: y + d))
+            ctx.stroke(star, with: .color(pc.opacity(opacity)),
+                       style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
+            // bright centre dot
+            ctx.fill(Path(ellipseIn: CGRect(x: x - 1, y: y - 1, width: 2, height: 2)),
+                     with: .color(pc.opacity(min(1, opacity * 1.4))))
+        }
+    }
+
+    // EMBER — real fire: wide flat base, sides curve inward, narrow pointed tip; rises & sways
+    private func drawFlames(_ ctx: GraphicsContext, _ size: CGSize, _ t: Double) {
+        // (baseX ratio, speed, radius, phase offset)
+        let defs: [(CGFloat, Double, CGFloat, Double)] = [
+            (0.18, 0.36, 3.8, 0.00),
+            (0.50, 0.42, 3.0, 0.28),
+            (0.78, 0.32, 4.2, 0.58),
+            (0.33, 0.39, 3.4, 0.78),
+            (0.64, 0.35, 2.8, 0.13),
+        ]
+        for (bx, speed, r, phOff) in defs {
+            let phase = (t * speed + phOff).truncatingRemainder(dividingBy: 1.0)
+            // Rise from 88 % → 8 % of card height
+            let cy    = size.height * CGFloat(0.88 - 0.80 * phase)
+            // Wind sway — tip leans more than base
+            let sway  = size.width * 0.045 * CGFloat(sin(t * 1.8 + phOff * 5.1))
+            let baseX = bx * size.width             // base stays put
+            let tipX  = baseX + sway                // tip drifts with wind
+
+            let opacity: Double = phase < 0.12 ? phase / 0.12 * 0.80
+                                : phase > 0.72 ? (1 - (phase - 0.72) / 0.28) * 0.80
+                                : 0.80
+
+            // Fire shape: wide flat base at BOTTOM, sides curve INWARD going up, pointed TIP at TOP
+            //   tip  ← narrow
+            //  /   \
+            // |     |  ← sides bow outward slightly in the lower third
+            // |_____|  ← wide flat base
+            let halfBase = r * 1.3
+            let baseY    = cy + r * 0.6    // flat base at bottom
+            let tipY     = cy - r * 2.4   // pointed tip at top
+
+            var flame = Path()
+            // start at left base corner
+            flame.move(to: CGPoint(x: baseX - halfBase, y: baseY))
+            // flat base to right corner
+            flame.addLine(to: CGPoint(x: baseX + halfBase, y: baseY))
+            // right side: curves inward as it rises to tip
+            flame.addCurve(
+                to:       CGPoint(x: tipX, y: tipY),
+                control1: CGPoint(x: baseX + halfBase * 1.1, y: cy + r * 0.0),
+                control2: CGPoint(x: tipX + r * 0.35,        y: tipY + r * 1.0))
+            // left side: symmetric, from tip back down to left base
+            flame.addCurve(
+                to:       CGPoint(x: baseX - halfBase, y: baseY),
+                control1: CGPoint(x: tipX - r * 0.35,        y: tipY + r * 1.0),
+                control2: CGPoint(x: baseX - halfBase * 1.1, y: cy + r * 0.0))
+
+            ctx.fill(flame, with: .color(pc.opacity(opacity)))
+
+            // bright inner core — smaller, same shape, higher opacity
+            let ir = r * 0.55
+            let iHalf = ir * 1.1
+            var core = Path()
+            core.move(to: CGPoint(x: baseX - iHalf, y: baseY))
+            core.addLine(to: CGPoint(x: baseX + iHalf, y: baseY))
+            core.addCurve(
+                to:       CGPoint(x: tipX, y: tipY + r * 0.9),
+                control1: CGPoint(x: baseX + iHalf * 1.1, y: cy + ir * 0.0),
+                control2: CGPoint(x: tipX + ir * 0.3,     y: tipY + r * 1.1))
+            core.addCurve(
+                to:       CGPoint(x: baseX - iHalf, y: baseY),
+                control1: CGPoint(x: tipX - ir * 0.3,     y: tipY + r * 1.1),
+                control2: CGPoint(x: baseX - iHalf * 1.1, y: cy + ir * 0.0))
+            ctx.fill(core, with: .color(pc.opacity(min(1, opacity * 1.25))))
+        }
     }
 }
 

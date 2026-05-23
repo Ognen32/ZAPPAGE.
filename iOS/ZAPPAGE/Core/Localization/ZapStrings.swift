@@ -38,6 +38,9 @@ struct ZapStrings {
     var privacyPolicy: String   { l("Privacy Policy",      "Политика за приватност") }
     var termsSuffix: String     { l(".",                   ".") }
 
+    // MARK: - Sign-up
+    var chooseYourHero: String { l("CHOOSE YOUR HERO", "ИЗБЕРИ ГО ТВОЈОТ ХЕРОЈ") }
+
     // MARK: - Errors
     var errorEmailRequired: String    { l("Email is required.",                   "Е-маилот е задолжителен.") }
     var errorPasswordShort: String    { l("Password must be at least 6 characters.", "Лозинката мора да има најмалку 6 знаци.") }

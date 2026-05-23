@@ -13,6 +13,7 @@ final class AuthViewModel {
     var email: String = ""
     var password: String = ""
     var username: String = ""
+    var selectedHero: ZapTheme.HeroKind = .zap
     var showPassword: Bool = false
     var isLoading: Bool = false
     var errorMessage: String? = nil
@@ -28,8 +29,9 @@ final class AuthViewModel {
         }
     }
 
-    func signInWithApple()  { /* TODO: ASAuthorizationAppleIDProvider → Firebase */ }
-    func signInWithGoogle() { /* TODO: GIDSignIn → Firebase */ }
+    func signInWithApple()    { /* TODO: ASAuthorizationAppleIDProvider → Firebase */ }
+    func signInWithFacebook() { /* TODO: LoginManager → Firebase */ }
+    func signInWithGoogle()   { /* TODO: GIDSignIn → Firebase */ }
     func continueAsGuest()  { /* TODO: Firebase anonymous auth */ }
 
     // MARK: - Private

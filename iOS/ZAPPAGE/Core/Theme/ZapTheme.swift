@@ -68,6 +68,42 @@ enum ZapTheme {
     // MARK: - Hero kinds
     enum HeroKind: String, CaseIterable {
         case zap, bolt, nyx, ember
+
+        var displayName: String {
+            switch self {
+            case .zap:   return "ZAP"
+            case .bolt:  return "BOLT"
+            case .nyx:   return "NYX"
+            case .ember: return "EMBER"
+            }
+        }
+
+        var roleLabel: String {
+            switch self {
+            case .zap:   return "THE SPARK"
+            case .bolt:  return "THE SWIFT"
+            case .nyx:   return "THE SHADOW"
+            case .ember: return "THE FLAME"
+            }
+        }
+
+        var bgFrom: Color {
+            switch self {
+            case .zap:   return Color(hex: "#2a0f00")
+            case .bolt:  return Color(hex: "#0a1a3a")
+            case .nyx:   return Color(hex: "#1a0a3a")
+            case .ember: return Color(hex: "#3a1400")
+            }
+        }
+
+        var bgTo: Color {
+            switch self {
+            case .zap:   return Color(hex: "#0f0500")
+            case .bolt:  return Color(hex: "#050a14")
+            case .nyx:   return Color(hex: "#0a0518")
+            case .ember: return Color(hex: "#150800")
+            }
+        }
     }
 }
 
