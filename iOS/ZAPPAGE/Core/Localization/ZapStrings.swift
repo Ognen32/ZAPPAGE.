@@ -17,8 +17,8 @@ struct ZapStrings {
 
     var loginSubtitle: String   { l("Pick up where you left off and read your library on any device.",
                                     "Продолжете од каде сте застанале и читајте ја вашата библиотека на кој било уред.") }
-    var signupSubtitle: String  { l("Create a free account and get 5 issues on us this week.",
-                                    "Создадете бесплатна сметка и добијте 5 изданија на наша сметка оваа недела.") }
+    var signupSubtitle: String  { l("Thousands of comics. Zero excuses. Your library awaits.",
+                                    "Илјадници стрипови. Ниту еден изговор. Твојата библиотека те чека.") }
 
     var logIn: String           { l("Log In",              "Најави се") }
     var signUp: String          { l("Sign Up",             "Регистрирај се") }

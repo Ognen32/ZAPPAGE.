@@ -30,9 +30,8 @@ struct HeroIllustration: View {
             // speed lines
             SpeedLines(isDark: isDark)
 
-            // chibi hero — centred, scaled 4.2×
-            ChibiHero(kind: hero, accent: accent, size: 36)
-                .scaleEffect(4.2)
+            // chibi hero — drawn at full display size for crisp vector quality
+            ChibiHero(kind: hero, accent: accent, size: 151)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .offset(y: -6)
 
