@@ -45,12 +45,16 @@ __pycache__/
 .env
 .venv
 venv/
+Backend/venv/
 ENV/
 env.bak/
 venv.bak/
 *.egg-info/
 dist/
 .pytest_cache/
+.python-version
+*.log
+uvicorn.log
 
 # ── Design files ────────────────────────────────────────────────
 UI:UX Designs/
@@ -58,11 +62,18 @@ UI/UX Designs/
 
 # ── macOS ───────────────────────────────────────────────────────
 .DS_Store
+**/.DS_Store
 .AppleDouble
 .LSOverride
 ._*
 .Spotlight-V100
 .Trashes
 
-# ── Claude Code ────────────────────────────────────────────────
+# ── Editors ─────────────────────────────────────────────────────
+.idea/
+*.swp
+*.swo
+.vscode/
+
+# ── Claude Code ─────────────────────────────────────────────────
 CLAUDE.md

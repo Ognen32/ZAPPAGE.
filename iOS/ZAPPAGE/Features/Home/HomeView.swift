@@ -1,4 +1,5 @@
 import SwiftUI
+import FirebaseAuth
 
 // MARK: - Route
 enum HomeRoute: String, CaseIterable {
@@ -25,16 +26,51 @@ enum HomeRoute: String, CaseIterable {
     var badge: String? { self == .library ? "24" : nil }
 }
 
+// MARK: - Connection state
+enum ConnectionState {
+    case idle, checking, online, offline
+
+    var dotColor: Color {
+        switch self {
+        case .idle:     return Color(hex: "#555566")
+        case .checking: return Color(hex: "#FFD84D")
+        case .online:   return Color(hex: "#3DD68C")
+        case .offline:  return Color(hex: "#F04E2A")
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .idle:     return "OFF"
+        case .checking: return "···"
+        case .online:   return "ON"
+        case .offline:  return "ERR"
+        }
+    }
+}
+
 // MARK: - HomeView
 struct HomeView: View {
+    var onSignOut: () -> Void = {}
     @State private var route: HomeRoute = .home
     @State private var menuOpen = false
+    @AppStorage("backendIP") private var backendIP: String = ""
+    @State private var connectionState: ConnectionState = .idle
     @Environment(\.colorScheme) private var scheme
     private var tone: ZapTheme.Tone { scheme == .dark ? ZapTheme.dark : ZapTheme.light }
 
     var body: some View {
         VStack(spacing: 0) {
-            HomeBrandBar(tone: tone, route: route, menuOpen: $menuOpen)
+            HomeBrandBar(
+                tone: tone,
+                route: route,
+                menuOpen: $menuOpen,
+                connectionState: connectionState,
+                onConnectionTap: {
+                    if connectionState == .online { connectionState = .idle }
+                    else if connectionState != .checking { checkConnection() }
+                }
+            )
 
             ZStack(alignment: .topTrailing) {
                 ScrollView(showsIndicators: false) {
@@ -58,7 +94,7 @@ struct HomeView: View {
                 }
 
                 if menuOpen {
-                    UserMenuDropdown(tone: tone, route: $route, menuOpen: $menuOpen)
+                    UserMenuDropdown(tone: tone, route: $route, menuOpen: $menuOpen, connectionState: connectionState, onSignOut: onSignOut)
                         .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .topTrailing))
                             .combined(with: .offset(y: -6)))
                         .padding(.trailing, 20)
@@ -86,6 +122,24 @@ struct HomeView: View {
         HomeSectionHeader(title: "Trending", tone: tone)
         TrendingList(comics: MockData.trending, tone: tone)
     }
+
+    // MARK: - Backend connection check
+    private func checkConnection() {
+        guard !backendIP.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        connectionState = .checking
+        Task { @MainActor in
+            let raw = backendIP.trimmingCharacters(in: .whitespaces)
+            guard let url = URL(string: "http://\(raw)/testConnection") else {
+                connectionState = .offline; return
+            }
+            do {
+                let (_, response) = try await URLSession.shared.data(from: url)
+                connectionState = (response as? HTTPURLResponse)?.statusCode == 200 ? .online : .offline
+            } catch {
+                connectionState = .offline
+            }
+        }
+    }
 }
 
 // MARK: - Brand bar
@@ -93,12 +147,15 @@ private struct HomeBrandBar: View {
     let tone: ZapTheme.Tone
     let route: HomeRoute
     @Binding var menuOpen: Bool
+    let connectionState: ConnectionState
+    let onConnectionTap: () -> Void
     private let accent = ZapTheme.accent
 
     var body: some View {
-        HStack {
+        HStack(spacing: 10) {
             ZapWordmark(size: 28, textColor: tone.text, accent: accent, letterSpacing: -1.5)
             Spacer()
+            ConnectionPill(state: connectionState, action: onConnectionTap)
             // Avatar button — accent bg when open, chipBg when closed
             Button { withAnimation(.easeOut(duration: 0.14)) { menuOpen.toggle() } } label: {
                 ZStack {
@@ -121,12 +178,42 @@ private struct HomeBrandBar: View {
     }
 }
 
+// MARK: - Connection pill
+private struct ConnectionPill: View {
+    let state: ConnectionState
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(state.dotColor)
+                    .frame(width: 6, height: 6)
+                Text(state.label)
+                    .font(ZapTheme.archivoBlack(9))
+                    .kerning(0.5)
+                    .foregroundStyle(state.dotColor)
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 5)
+            .background(state.dotColor.opacity(0.12))
+            .clipShape(Capsule())
+            .overlay(Capsule().stroke(state.dotColor.opacity(0.3), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .disabled(state == .checking)
+    }
+}
+
 // MARK: - User menu dropdown
 // Matches UserMenu in the design reference (home.jsx).
 private struct UserMenuDropdown: View {
     let tone: ZapTheme.Tone
     @Binding var route: HomeRoute
     @Binding var menuOpen: Bool
+    let connectionState: ConnectionState
+    let onSignOut: () -> Void
+    @AppStorage("backendIP") private var backendIP: String = ""
     private let accent = ZapTheme.accent
 
     var body: some View {
@@ -210,10 +297,43 @@ private struct UserMenuDropdown: View {
 
             Divider().overlay(tone.line)
 
+            // Backend IP
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "network")
+                        .font(.system(size: 11))
+                        .foregroundStyle(tone.textDim)
+                    Text("BACKEND IP")
+                        .font(ZapTheme.archivoBlack(9))
+                        .kerning(0.5)
+                        .foregroundStyle(tone.textDim)
+                    Spacer()
+                    Circle()
+                        .fill(connectionState.dotColor)
+                        .frame(width: 6, height: 6)
+                }
+                TextField("192.168.1.1:8000", text: $backendIP)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(tone.text)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 7)
+                    .background(tone.field)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(tone.chipBorder, lineWidth: 0.5))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+
+            Divider().overlay(tone.line)
+
             // Logout
             Button {
                 menuOpen = false
-                // TODO: sign out
+                try? FirebaseAuth.Auth.auth().signOut()
+                onSignOut()
             } label: {
                 HStack(spacing: 12) {
                     Image(systemName: "rectangle.portrait.and.arrow.right")

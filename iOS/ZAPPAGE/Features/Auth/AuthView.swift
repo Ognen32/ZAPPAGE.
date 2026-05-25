@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AuthView: View {
     @State private var vm = AuthViewModel()
+    @State private var showSuccess = false
     @AppStorage("zapLanguage") private var languageRaw: String = ZapLanguage.english.rawValue
     @Environment(\.colorScheme) private var scheme
 
@@ -13,25 +14,34 @@ struct AuthView: View {
     private var s: ZapStrings { ZapStrings(language: language) }
 
     var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 0) {
-                brandBar
-                heroCard
-                welcomeBlock
-                tabToggle
-                formFields
-                ctaButton
-                divider
-                socialRow
-                termsText
-                guestButton
+        ZStack {
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    brandBar
+                    heroCard
+                    welcomeBlock
+                    tabToggle
+                    formFields
+                    ctaButton
+                    divider
+                    socialRow
+                    termsText
+                    guestButton
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 12)
-            .padding(.bottom, 24)
+            .background(tone.bg.ignoresSafeArea())
+            .scrollDismissesKeyboard(.interactively)
+            .blur(radius: showSuccess ? 8 : 0)
+
+            if showSuccess {
+                AuthSuccessOverlay()
+                    .transition(.opacity)
+            }
         }
-        .background(tone.bg.ignoresSafeArea())
-        .scrollDismissesKeyboard(.interactively)
+        .animation(.easeInOut(duration: 0.35), value: showSuccess)
     }
 
     // MARK: - Brand bar + language toggle
@@ -147,11 +157,37 @@ struct AuthView: View {
 
     // MARK: - Primary CTA
     private var ctaButton: some View {
-        PrimaryButton(label: vm.tab == .login ? s.logIn : s.createAccount, accent: accent) {
-            vm.submitEmail(strings: s)
-            if vm.errorMessage == nil { onAuthenticated?() }
+        Group {
+            if vm.isLoading {
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        .scaleEffect(0.85)
+                    Text(vm.tab == .login ? "Signing in…" : "Creating account…")
+                        .font(ZapTheme.archivoBlack(13))
+                        .kerning(0.4)
+                        .textCase(.uppercase)
+                        .foregroundStyle(.white)
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 52)
+                .background(accent.opacity(0.75))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            } else {
+                PrimaryButton(label: vm.tab == .login ? s.logIn : s.createAccount, accent: accent) {
+                    vm.submitEmail(strings: s) {
+                        withAnimation(.spring(response: 0.45, dampingFraction: 0.7)) {
+                            showSuccess = true
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+                            onAuthenticated?()
+                        }
+                    }
+                }
+            }
         }
         .padding(.top, 16)
+        .animation(.easeInOut(duration: 0.18), value: vm.isLoading)
     }
 
     // MARK: - OR divider
@@ -520,6 +556,58 @@ private struct HeroCardParticles: View {
                 control1: CGPoint(x: tipX - ir * 0.3,     y: tipY + r * 1.1),
                 control2: CGPoint(x: baseX - iHalf * 1.1, y: cy + ir * 0.0))
             ctx.fill(core, with: .color(pc.opacity(min(1, opacity * 1.25))))
+        }
+    }
+}
+
+// MARK: - Success overlay (bubble expand from center)
+private struct AuthSuccessOverlay: View {
+    private let accent = ZapTheme.accent
+    @State private var bubbleScale:     CGFloat = 0.01
+    @State private var textScale:       CGFloat = 0.6
+    @State private var textOpacity:     Double  = 0
+    @State private var subtitleOffset:  CGFloat = 22
+    @State private var subtitleOpacity: Double  = 0
+
+    var body: some View {
+        ZStack {
+            // Orange bubble that expands from center dot to fill screen
+            Circle()
+                .fill(accent)
+                .frame(width: 1200, height: 1200)
+                .scaleEffect(bubbleScale)
+
+            VStack(spacing: 14) {
+                Text("ZAP!")
+                    .font(ZapTheme.archivoBlack(96))
+                    .kerning(-3)
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.25), radius: 0, x: 4, y: 4)
+                    .scaleEffect(textScale)
+                    .opacity(textOpacity)
+
+                Text("YOU'RE IN")
+                    .font(ZapTheme.archivoBlack(20))
+                    .kerning(3)
+                    .foregroundStyle(.white.opacity(0.88))
+                    .offset(y: subtitleOffset)
+                    .opacity(subtitleOpacity)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea()
+        .onAppear {
+            withAnimation(.spring(response: 0.52, dampingFraction: 0.76)) {
+                bubbleScale = 1.0
+            }
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.65).delay(0.28)) {
+                textScale   = 1.0
+                textOpacity = 1.0
+            }
+            withAnimation(.easeOut(duration: 0.32).delay(0.44)) {
+                subtitleOffset  = 0
+                subtitleOpacity = 1
+            }
         }
     }
 }

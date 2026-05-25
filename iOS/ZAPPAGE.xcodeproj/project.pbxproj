@@ -6,6 +6,12 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		15DEFE102FC4FF2B008D89E1 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 15DEFE0F2FC4FF2B008D89E1 /* GoogleService-Info.plist */; };
+		15DEFE132FC50056008D89E1 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 15DEFE122FC50056008D89E1 /* FirebaseAuth */; };
+		15DEFE152FC50056008D89E1 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 15DEFE142FC50056008D89E1 /* FirebaseFirestore */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		1519370C2FC1216C0072B31C /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -27,6 +33,7 @@
 		151936FE2FC1216B0072B31C /* ZAPPAGE.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ZAPPAGE.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1519370B2FC1216C0072B31C /* ZAPPAGETests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ZAPPAGETests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		151937152FC1216C0072B31C /* ZAPPAGEUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ZAPPAGEUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		15DEFE0F2FC4FF2B008D89E1 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -52,6 +59,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				15DEFE132FC50056008D89E1 /* FirebaseAuth in Frameworks */,
+				15DEFE152FC50056008D89E1 /* FirebaseFirestore in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -75,6 +84,7 @@
 		151936F52FC1216B0072B31C = {
 			isa = PBXGroup;
 			children = (
+				15DEFE0F2FC4FF2B008D89E1 /* GoogleService-Info.plist */,
 				151937002FC1216B0072B31C /* ZAPPAGE */,
 				1519370E2FC1216C0072B31C /* ZAPPAGETests */,
 				151937182FC1216C0072B31C /* ZAPPAGEUITests */,
@@ -112,6 +122,8 @@
 			);
 			name = ZAPPAGE;
 			packageProductDependencies = (
+				15DEFE122FC50056008D89E1 /* FirebaseAuth */,
+				15DEFE142FC50056008D89E1 /* FirebaseFirestore */,
 			);
 			productName = ZAPPAGE;
 			productReference = 151936FE2FC1216B0072B31C /* ZAPPAGE.app */;
@@ -195,6 +207,9 @@
 			);
 			mainGroup = 151936F52FC1216B0072B31C;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				15DEFE112FC50056008D89E1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 151936FF2FC1216B0072B31C /* Products */;
 			projectDirPath = "";
@@ -212,6 +227,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				15DEFE102FC4FF2B008D89E1 /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -578,6 +594,30 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		15DEFE112FC50056008D89E1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 12.13.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		15DEFE122FC50056008D89E1 /* FirebaseAuth */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 15DEFE112FC50056008D89E1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseAuth;
+		};
+		15DEFE142FC50056008D89E1 /* FirebaseFirestore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 15DEFE112FC50056008D89E1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseFirestore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 151936F62FC1216B0072B31C /* Project object */;
 }
