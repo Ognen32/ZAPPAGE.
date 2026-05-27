@@ -41,6 +41,52 @@ struct ZapStrings {
     // MARK: - Sign-up
     var chooseYourHero: String { l("CHOOSE YOUR HERO", "ИЗБЕРИ ГО ТВОЈОТ ХЕРОЈ") }
 
+    // MARK: - Home navigation
+    var routeHome: String        { l("Home",              "Почетна") }
+    var routeReading: String     { l("Currently Reading", "Моментално читам") }
+    var routeLibrary: String     { l("My Library",        "Мојата библиотека") }
+    var routeFavourites: String  { l("Favourites",        "Омилени") }
+    var routeRead: String        { l("Read Comics",       "Прочитани стрипови") }
+
+    // MARK: - Home sections
+    var searchPlaceholder: String  { l("Search titles, characters, creators…", "Пребарај наслови, ликови, автори…") }
+    var allPublishers: String      { l("All",                   "Сите") }
+    var seeAll: String             { l("See all ›",             "Види ги сите ›") }
+    var continueReading: String    { l("Continue Reading",      "Продолжи со читање") }
+    var newThisWeek: String        { l("New This Week",         "Ново оваа недела") }
+    var myLibrary: String          { l("My Library",            "Мојата библиотека") }
+    var trending: String           { l("Trending",              "Во тренд") }
+    var newBadge: String           { l("NEW",                   "НОВО") }
+    var downloaded: String         { l("Downloaded",            "Преземено") }
+    var nothingHere: String        { l("Nothing here yet.",     "Сè уште нема ништо.") }
+    var pickUpWhere: String        { l("Pick Up Where You Left Off", "Продолжи од каде застана") }
+    var resumeBtn: String          { l("Resume",                "Продолжи") }
+    var issueWord: String          { l("Issue",                 "Број") }
+    var pageWord: String           { l("Page",                  "Страна") }
+    var ofWord: String             { l("of",                    "од") }
+
+    // MARK: - Home subtitles
+    var subtitleReading: String    { l("Pick up where you left off",   "Продолжи од каде застана") }
+    var subtitleLibrary: String    { l("24 issues downloaded · 2.3 GB","24 броеви преземени · 2.3 GB") }
+    var subtitleFavourites: String { l("Your saved comics & series",   "Твоите зачувани стрипови и серии") }
+    var subtitleRead: String       { l("Finished issues · 142 total",  "Завршени броеви · 142 вкупно") }
+
+    // MARK: - User menu
+    var logOut: String             { l("Log Out",               "Одјави се") }
+
+    // MARK: - Offline prompt
+    var offlineTitle: String       { l("You're Offline",        "Сте офлајн") }
+    var offlineSubtitle: String    { l("Connect to the ZAPPAGE server\nto browse and download comics.",
+                                       "Поврзете се со ZAPPAGE серверот\nза да прелистувате и преземате стрипови.") }
+    var connectNow: String         { l("Connect Now",           "Поврзи се") }
+    var connectingLabel: String    { l("Connecting…",           "Поврзување…") }
+    var orDivider: String          { l("or",                    "или") }
+    var offlineFooter: String      { l("Continue reading your saved comics\nor import files from your device.",
+                                       "Продолжете да читате зачувани стрипови\nили увезете датотеки од вашиот уред.") }
+    var noResults: String          { l("No Results",               "Нема резултати") }
+    var noResultsSub: String       { l("Try a different title, character, or creator.",
+                                       "Обидете се со друг наслов, лик или автор.") }
+
     // MARK: - Errors
     var errorEmailRequired: String    { l("Email is required.",                   "Е-маилот е задолжителен.") }
     var errorPasswordShort: String    { l("Password must be at least 6 characters.", "Лозинката мора да има најмалку 6 знаци.") }

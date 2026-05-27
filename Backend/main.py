@@ -40,6 +40,26 @@ async def fetch(url: str) -> BeautifulSoup:
     return BeautifulSoup(response.text, "html.parser")
 
 
+def parse_pagination(soup: BeautifulSoup) -> list:
+    pages = []
+    ul = soup.find("ul", class_="page-numbers")
+    if not ul:
+        return pages
+    for li in ul.find_all("li"):
+        span_dots = li.find("span", class_="dots")
+        if span_dots:
+            pages.append({"type": "dots"})
+            continue
+        span_current = li.find("span", class_="current")
+        if span_current:
+            pages.append({"type": "current", "number": int(span_current.get_text(strip=True).replace(",", ""))})
+            continue
+        a = li.find("a", class_="page-numbers")
+        if a:
+            pages.append({"type": "page", "number": int(a.get_text(strip=True).replace(",", "")), "url": a.get("href")})
+    return pages
+
+
 def parse_comics(soup: BeautifulSoup) -> list:
     comics = []
     post_list = soup.find("div", class_="post-list-posts")
@@ -110,21 +130,45 @@ async def test_connection():
 async def list_all_comics(page: int = Query(1, ge=1)):
     url = f"{COMICS_BASE_URL}/" if page == 1 else f"{COMICS_BASE_URL}/page/{page}/"
     soup = await fetch(url)
-    return {"page": page, "comics": parse_comics(soup)}
+    return {"page": page, "comics": parse_comics(soup), "pagination": parse_pagination(soup)}
 
 
 @app.get("/comics/dc")
 async def list_dc_comics(page: int = Query(1, ge=1)):
     url = f"{COMICS_BASE_URL}/cat/dc/" if page == 1 else f"{COMICS_BASE_URL}/cat/dc/page/{page}/"
     soup = await fetch(url)
-    return {"page": page, "comics": parse_comics(soup)}
+    return {"page": page, "comics": parse_comics(soup), "pagination": parse_pagination(soup)}
 
 
 @app.get("/comics/marvel")
 async def list_marvel_comics(page: int = Query(1, ge=1)):
     url = f"{COMICS_BASE_URL}/cat/marvel/" if page == 1 else f"{COMICS_BASE_URL}/cat/marvel/page/{page}/"
     soup = await fetch(url)
-    return {"page": page, "comics": parse_comics(soup)}
+    return {"page": page, "comics": parse_comics(soup), "pagination": parse_pagination(soup)}
+
+
+@app.get("/comics/indie-week")
+async def list_indie_week_comics(page: int = Query(1, ge=1)):
+    url = f"{COMICS_BASE_URL}/tag/indie-week/" if page == 1 else f"{COMICS_BASE_URL}/tag/indie-week/page/{page}/"
+    soup = await fetch(url)
+    return {"page": page, "comics": parse_comics(soup), "pagination": parse_pagination(soup)}
+
+
+@app.get("/comics/tag")
+async def list_tag_comics(tag: str = Query(..., description="Tag slug, e.g. europe-comics"), page: int = Query(1, ge=1)):
+    url = f"{COMICS_BASE_URL}/tag/{tag}/" if page == 1 else f"{COMICS_BASE_URL}/tag/{tag}/page/{page}/"
+    soup = await fetch(url)
+    return {"page": page, "tag": tag, "comics": parse_comics(soup)}
+
+
+@app.get("/comics/search")
+async def search_comics(q: str = Query(..., description="Search query"), page: int = Query(1, ge=1)):
+    url = f"{COMICS_BASE_URL}/?s={q}" if page == 1 else f"{COMICS_BASE_URL}/page/{page}/?s={q}"
+    soup = await fetch(url)
+    no_results_nav = soup.find("nav", class_="pagination-noresults")
+    if no_results_nav:
+        return {"page": page, "query": q, "no_results": True, "message": "No results found. Please try another search query.", "comics": [], "pagination": []}
+    return {"page": page, "query": q, "no_results": False, "comics": parse_comics(soup), "pagination": parse_pagination(soup)}
 
 
 @app.get("/comic/scrape")

@@ -274,7 +274,7 @@ struct AuthView: View {
 }
 
 // MARK: - Language toggle (EN | МК pill)
-private struct LanguageToggle: View {
+struct LanguageToggle: View {
     @Binding var selected: String
     let tone: ZapTheme.Tone
     let accent: Color

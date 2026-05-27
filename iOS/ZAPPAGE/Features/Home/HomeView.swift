@@ -24,6 +24,26 @@ enum HomeRoute: String, CaseIterable {
         }
     }
     var badge: String? { self == .library ? "24" : nil }
+
+    func localLabel(_ s: ZapStrings) -> String {
+        switch self {
+        case .home:       return s.routeHome
+        case .reading:    return s.routeReading
+        case .library:    return s.routeLibrary
+        case .favourites: return s.routeFavourites
+        case .read:       return s.routeRead
+        }
+    }
+
+    func localSubtitle(_ s: ZapStrings) -> String {
+        switch self {
+        case .reading:    return s.subtitleReading
+        case .library:    return s.subtitleLibrary
+        case .favourites: return s.subtitleFavourites
+        case .read:       return s.subtitleRead
+        default:          return ""
+        }
+    }
 }
 
 // MARK: - Connection state
@@ -56,9 +76,16 @@ struct HomeView: View {
     @State private var route: HomeRoute = .home
     @State private var menuOpen = false
     @AppStorage("backendIP") private var backendIP: String = ""
+    @AppStorage("zapLanguage") private var languageRaw: String = ZapLanguage.english.rawValue
     @State private var connectionState: ConnectionState = .idle
+    @State private var searchActive = false
+    @State private var showDocPicker = false
+    @State private var cbzPages: [CBZPage] = []
+    @State private var showReader = false
     @Environment(\.colorScheme) private var scheme
     private var tone: ZapTheme.Tone { scheme == .dark ? ZapTheme.dark : ZapTheme.light }
+    private var language: ZapLanguage { ZapLanguage(rawValue: languageRaw) ?? .english }
+    private var s: ZapStrings { ZapStrings(language: language) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -68,6 +95,7 @@ struct HomeView: View {
                 menuOpen: $menuOpen,
                 hero: session.hero,
                 connectionState: connectionState,
+                languageRaw: $languageRaw,
                 onConnectionTap: {
                     if connectionState == .online { connectionState = .idle }
                     else if connectionState != .checking { checkConnection() }
@@ -79,14 +107,24 @@ struct HomeView: View {
                     VStack(spacing: 0) {
                         switch route {
                         case .home:
-                            homeSections
+                            if connectionState == .online { homeSections }
                         default:
-                            SubPageView(route: route, tone: tone)
+                            SubPageView(route: route, tone: tone, s: s)
                         }
                         Spacer().frame(height: 32)
                     }
                 }
                 .background(tone.bg)
+
+                if connectionState != .online && route == .home {
+                    ServerConnectPrompt(
+                        tone: tone,
+                        connectionState: connectionState,
+                        s: s,
+                        onTap: { if connectionState != .checking { checkConnection() } }
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
 
                 if menuOpen {
                     Color.clear
@@ -96,11 +134,23 @@ struct HomeView: View {
                 }
 
                 if menuOpen {
-                    UserMenuDropdown(tone: tone, route: $route, menuOpen: $menuOpen, hero: session.hero, username: session.username, email: session.email, connectionState: connectionState, onSignOut: onSignOut)
+                    UserMenuDropdown(tone: tone, route: $route, menuOpen: $menuOpen, hero: session.hero, username: session.username, email: session.email, connectionState: connectionState, s: s, onSignOut: onSignOut, onLoadComic: { showDocPicker = true })
                         .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .topTrailing))
                             .combined(with: .offset(y: -6)))
                         .padding(.trailing, 20)
                         .padding(.top, 4)
+                        .zIndex(20)
+                }
+
+                if searchActive {
+                    SearchView(
+                        tone: tone,
+                        s: s,
+                        backendIP: backendIP,
+                        onDismiss: { withAnimation(.easeOut(duration: 0.2)) { searchActive = false } }
+                    )
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .zIndex(10)
                 }
             }
         }
@@ -108,21 +158,42 @@ struct HomeView: View {
         .ignoresSafeArea(edges: .top)
         .animation(.easeOut(duration: 0.14), value: menuOpen)
         .task { await session.load() }
+        .sheet(isPresented: $showDocPicker) {
+            DocumentPicker { url in
+                // Acquire scope now, while the picker callback is still active,
+                // before dismissing the sheet could invalidate the sandbox grant.
+                let access = url.startAccessingSecurityScopedResource()
+                showDocPicker = false
+                Task.detached(priority: .userInitiated) {
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    guard let pages = try? loadCBZPages(from: url), !pages.isEmpty else { return }
+                    await MainActor.run {
+                        cbzPages = pages
+                        showReader = true
+                    }
+                }
+            }
+        }
+        .fullScreenCover(isPresented: $showReader) {
+            CBZReaderView(pages: cbzPages)
+        }
     }
 
     // MARK: - Home feed sections
     @ViewBuilder
     private var homeSections: some View {
-        HomeSearchBar(tone: tone)
-        PublisherChips(tone: tone)
-        FeaturedHeroCard(comic: MockData.featured, tone: tone)
-        HomeSectionHeader(title: "Continue Reading", tone: tone)
+        HomeSearchBar(tone: tone, s: s, onActivate: {
+            withAnimation(.easeOut(duration: 0.2)) { searchActive = true }
+        })
+        PublisherChips(tone: tone, s: s)
+        FeaturedHeroCard(comic: MockData.featured, tone: tone, s: s)
+        HomeSectionHeader(title: s.continueReading, tone: tone, s: s)
         ContinueReadingRow(comics: MockData.continueReading, tone: tone)
-        HomeSectionHeader(title: "New This Week", tone: tone)
-        NewThisWeekRow(comics: MockData.newThisWeek, tone: tone)
-        HomeSectionHeader(title: "My Library", tone: tone)
-        MyLibraryList(comics: MockData.myLibrary, tone: tone)
-        HomeSectionHeader(title: "Trending", tone: tone)
+        HomeSectionHeader(title: s.newThisWeek, tone: tone, s: s)
+        NewThisWeekRow(comics: MockData.newThisWeek, tone: tone, s: s)
+        HomeSectionHeader(title: s.myLibrary, tone: tone, s: s)
+        MyLibraryList(comics: MockData.myLibrary, tone: tone, s: s)
+        HomeSectionHeader(title: s.trending, tone: tone, s: s)
         TrendingList(comics: MockData.trending, tone: tone)
     }
 
@@ -152,6 +223,7 @@ private struct HomeBrandBar: View {
     @Binding var menuOpen: Bool
     let hero: ZapTheme.HeroKind
     let connectionState: ConnectionState
+    @Binding var languageRaw: String
     let onConnectionTap: () -> Void
     private let accent = ZapTheme.accent
 
@@ -160,6 +232,7 @@ private struct HomeBrandBar: View {
             ZapWordmark(size: 28, textColor: tone.text, accent: accent, letterSpacing: -1.5)
             Spacer()
             ConnectionPill(state: connectionState, action: onConnectionTap)
+            LanguageToggle(selected: $languageRaw, tone: tone, accent: accent)
             // Avatar button — accent bg when open, chipBg when closed
             Button { withAnimation(.easeOut(duration: 0.14)) { menuOpen.toggle() } } label: {
                 ZStack {
@@ -219,7 +292,9 @@ private struct UserMenuDropdown: View {
     let username: String
     let email: String
     let connectionState: ConnectionState
+    let s: ZapStrings
     let onSignOut: () -> Void
+    let onLoadComic: () -> Void
     @AppStorage("backendIP") private var backendIP: String = ""
     private let accent = ZapTheme.accent
 
@@ -268,7 +343,7 @@ private struct UserMenuDropdown: View {
                                 .foregroundStyle(active ? accent : tone.textDim)
                                 .frame(width: 22, height: 22)
 
-                            Text(r.label)
+                            Text(r.localLabel(s))
                                 .font(.system(size: 14, weight: active ? .semibold : .medium))
                                 .foregroundStyle(active ? accent : tone.text)
                                 .kerning(-0.15)
@@ -337,6 +412,39 @@ private struct UserMenuDropdown: View {
 
             Divider().overlay(tone.line)
 
+            // Load comic
+            Button {
+                menuOpen = false
+                onLoadComic()
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "folder.badge.plus")
+                        .font(.system(size: 15))
+                        .foregroundStyle(accent)
+                        .frame(width: 22, height: 22)
+                    Text("Load Comic")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(accent)
+                        .kerning(-0.15)
+                    Spacer()
+                    Text("CBZ / ZIP")
+                        .font(ZapTheme.archivoBlack(9))
+                        .kerning(0.4)
+                        .foregroundStyle(tone.textMuted)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(tone.chipBg)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 10)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 6)
+
+            Divider().overlay(tone.line)
+
             // Logout
             Button {
                 menuOpen = false
@@ -348,7 +456,7 @@ private struct UserMenuDropdown: View {
                         .font(.system(size: 15))
                         .foregroundStyle(Color(hex: "#F04E2A"))
                         .frame(width: 22, height: 22)
-                    Text("Log Out")
+                    Text(s.logOut)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(Color(hex: "#F04E2A"))
                         .kerning(-0.15)
@@ -374,6 +482,7 @@ private struct UserMenuDropdown: View {
 private struct SubPageView: View {
     let route: HomeRoute
     let tone: ZapTheme.Tone
+    let s: ZapStrings
     private let accent = ZapTheme.accent
 
     private var comics: [MockComic] {
@@ -386,26 +495,16 @@ private struct SubPageView: View {
         }
     }
 
-    private var subtitle: String {
-        switch route {
-        case .reading:    return "Pick up where you left off"
-        case .library:    return "24 issues downloaded · 2.3 GB"
-        case .favourites: return "Your saved comics & series"
-        case .read:       return "Finished issues · 142 total"
-        default:          return ""
-        }
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // page header
             VStack(alignment: .leading, spacing: 4) {
-                Text(route.label)
+                Text(route.localLabel(s))
                     .font(ZapTheme.archivoBlack(26))
                     .foregroundStyle(tone.text)
                     .textCase(.uppercase)
                     .kerning(-0.5)
-                Text(subtitle)
+                Text(route.localSubtitle(s))
                     .font(.system(size: 13))
                     .foregroundStyle(tone.textDim)
             }
@@ -413,7 +512,7 @@ private struct SubPageView: View {
             .padding(.bottom, 20)
 
             if comics.isEmpty {
-                Text("Nothing here yet.")
+                Text(s.nothingHere)
                     .font(.system(size: 14))
                     .foregroundStyle(tone.textMuted)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -454,21 +553,20 @@ private struct SubPageView: View {
 // MARK: - Search bar
 private struct HomeSearchBar: View {
     let tone: ZapTheme.Tone
-    @State private var query = ""
-    @FocusState private var focused: Bool
+    let s: ZapStrings
+    let onActivate: () -> Void
     private let accent = ZapTheme.accent
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 15))
-                .foregroundStyle(focused ? tone.text : tone.textDim)
-            TextField("Search titles, characters, creators…", text: $query)
-                .font(.system(size: 15))
-                .foregroundStyle(tone.text)
-                .tint(accent)
-                .focused($focused)
-            if query.isEmpty {
+        Button(action: onActivate) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 15))
+                    .foregroundStyle(tone.textDim)
+                Text(s.searchPlaceholder)
+                    .font(.system(size: 15))
+                    .foregroundStyle(tone.textMuted)
+                Spacer()
                 Text("⌘K")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(tone.textMuted)
@@ -476,26 +574,23 @@ private struct HomeSearchBar: View {
                     .background(tone.chipBg)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                     .overlay(RoundedRectangle(cornerRadius: 4).stroke(tone.chipBorder, lineWidth: 0.5))
-            } else {
-                Button { query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(tone.textDim)
-                }
             }
+            .padding(.horizontal, 12)
+            .frame(height: 42)
+            .background(tone.field)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(tone.chipBorder, lineWidth: 0.5))
         }
-        .padding(.horizontal, 12)
-        .frame(height: 42)
-        .background(focused ? tone.fieldFocus : tone.field)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(focused ? accent.opacity(0.5) : tone.chipBorder, lineWidth: 0.5))
+        .buttonStyle(.plain)
         .padding(.horizontal, 20)
         .padding(.vertical, 8)
-        .animation(.easeInOut(duration: 0.12), value: focused)
     }
 }
 
 // MARK: - Publisher chips
 private struct PublisherChips: View {
     let tone: ZapTheme.Tone
+    let s: ZapStrings
     @State private var active = "All"
     private let accent = ZapTheme.accent
     private let publishers = ["All","DC","Marvel","Image","Dark Horse","Boom!","IDW","Indie"]
@@ -506,7 +601,7 @@ private struct PublisherChips: View {
                 ForEach(publishers, id: \.self) { pub in
                     let on = pub == active
                     Button { active = pub } label: {
-                        Text(pub)
+                        Text(pub == "All" ? s.allPublishers : pub)
                             .font(ZapTheme.archivoBlack(12)).kerning(0.4).textCase(.uppercase)
                             .foregroundStyle(on ? .white : tone.text)
                             .padding(.horizontal, 14).padding(.vertical, 8)
@@ -526,6 +621,7 @@ private struct PublisherChips: View {
 private struct FeaturedHeroCard: View {
     let comic: MockComic
     let tone: ZapTheme.Tone
+    let s: ZapStrings
     private let accent = ZapTheme.accent
     @State private var pulse = false
 
@@ -550,7 +646,7 @@ private struct FeaturedHeroCard: View {
                     Circle().fill(.white).frame(width: 6, height: 6)
                         .opacity(pulse ? 0.5 : 1).scaleEffect(pulse ? 0.7 : 1)
                         .animation(.easeInOut(duration: 0.8).repeatForever(), value: pulse)
-                    Text("Pick Up Where You Left Off")
+                    Text(s.pickUpWhere)
                         .font(ZapTheme.archivoBlack(10)).kerning(0.8).textCase(.uppercase).foregroundStyle(.white)
                 }
                 .padding(.horizontal, 8).padding(.vertical, 4)
@@ -565,7 +661,7 @@ private struct FeaturedHeroCard: View {
                             .font(ZapTheme.archivoBlack(32)).foregroundStyle(Color(hex: comic.fg))
                             .textCase(.uppercase).kerning(-0.8).lineLimit(2)
                             .shadow(color: .black.opacity(0.45), radius: 0, x: 0, y: 2)
-                        Text("Issue \(comic.issue) · Page \(comic.currentPage) of \(comic.pages) · \(Int(comic.progress*100))%")
+                        Text("\(s.issueWord) \(comic.issue) · \(s.pageWord) \(comic.currentPage) \(s.ofWord) \(comic.pages) · \(Int(comic.progress*100))%")
                             .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.85)).kerning(0.2)
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
@@ -578,7 +674,7 @@ private struct FeaturedHeroCard: View {
                     Button { } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "play.fill").font(.system(size: 10))
-                            Text("Resume").font(ZapTheme.archivoBlack(11)).kerning(0.4).textCase(.uppercase)
+                            Text(s.resumeBtn).font(ZapTheme.archivoBlack(11)).kerning(0.4).textCase(.uppercase)
                         }
                         .foregroundStyle(Color(hex: "#0A0A0B"))
                         .padding(.horizontal, 14).padding(.vertical, 8)
@@ -599,11 +695,12 @@ private struct FeaturedHeroCard: View {
 private struct HomeSectionHeader: View {
     let title: String
     let tone: ZapTheme.Tone
+    let s: ZapStrings
     var body: some View {
         HStack(alignment: .firstTextBaseline) {
             Text(title).font(ZapTheme.archivoBlack(18)).textCase(.uppercase).kerning(-0.2).foregroundStyle(tone.text)
             Spacer()
-            Button("See all ›") { }.font(.system(size: 13, weight: .semibold)).foregroundStyle(ZapTheme.accent).kerning(-0.1)
+            Button(s.seeAll) { }.font(.system(size: 13, weight: .semibold)).foregroundStyle(ZapTheme.accent).kerning(-0.1)
         }
         .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 10)
     }
@@ -634,7 +731,7 @@ private struct ContinueReadingRow: View {
 
 // MARK: - New This Week row
 private struct NewThisWeekRow: View {
-    let comics: [MockComic]; let tone: ZapTheme.Tone
+    let comics: [MockComic]; let tone: ZapTheme.Tone; let s: ZapStrings
     private let accent = ZapTheme.accent
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -644,7 +741,7 @@ private struct NewThisWeekRow: View {
                         ZStack(alignment: .topTrailing) {
                             ComicCoverCard(comic: comic, width: 124, height: 174, accent: accent)
                             if index == 0 {
-                                Text("NEW").font(ZapTheme.archivoBlack(8)).kerning(0.6)
+                                Text(s.newBadge).font(ZapTheme.archivoBlack(8)).kerning(0.6)
                                     .foregroundStyle(Color(hex: "#0A0A0B"))
                                     .padding(.horizontal, 5).padding(.vertical, 2)
                                     .background(.white).clipShape(RoundedRectangle(cornerRadius: 3))
@@ -662,7 +759,7 @@ private struct NewThisWeekRow: View {
 
 // MARK: - My Library list
 private struct MyLibraryList: View {
-    let comics: [MockComic]; let tone: ZapTheme.Tone
+    let comics: [MockComic]; let tone: ZapTheme.Tone; let s: ZapStrings
     private let accent = ZapTheme.accent
     var body: some View {
         VStack(spacing: 12) {
@@ -673,7 +770,7 @@ private struct MyLibraryList: View {
                         Text("\(comic.displayTitle) \(comic.issue)").font(.system(size: 14, weight: .semibold)).foregroundStyle(tone.text).kerning(-0.2).lineLimit(1)
                         HStack(spacing: 6) {
                             Image(systemName: "checkmark.circle.fill").font(.system(size: 11)).foregroundStyle(Color(hex: "#3DD68C"))
-                            Text("Downloaded · \(String(format: "%.1f", comic.fileSizeMB)) MB · \(comic.publisher)").font(.system(size: 12)).foregroundStyle(tone.textDim)
+                            Text("\(s.downloaded) · \(String(format: "%.1f", comic.fileSizeMB)) MB · \(comic.publisher)").font(.system(size: 12)).foregroundStyle(tone.textDim)
                         }
                     }
                     Spacer()
@@ -713,6 +810,72 @@ private struct TrendingList: View {
                 }
             }
         }.padding(.horizontal, 20).padding(.bottom, 12)
+    }
+}
+
+// MARK: - Server connect prompt
+private struct ServerConnectPrompt: View {
+    let tone: ZapTheme.Tone
+    let connectionState: ConnectionState
+    let s: ZapStrings
+    let onTap: () -> Void
+    private let accent = ZapTheme.accent
+
+    var body: some View {
+        VStack {
+            Spacer()
+            VStack(spacing: 28) {
+                VStack(spacing: 10) {
+                    Text(s.offlineTitle)
+                        .font(ZapTheme.archivoBlack(22))
+                        .foregroundStyle(tone.text)
+                        .textCase(.uppercase)
+                        .kerning(-0.4)
+
+                    Text(s.offlineSubtitle)
+                        .font(.system(size: 14))
+                        .foregroundStyle(tone.textDim)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(4)
+                }
+
+                Button(action: onTap) {
+                    HStack(spacing: 8) {
+                        if connectionState == .checking {
+                            ProgressView().tint(.white).scaleEffect(0.8)
+                            Text(s.connectingLabel)
+                        } else {
+                            Text(s.connectNow)
+                        }
+                    }
+                    .font(ZapTheme.archivoBlack(13))
+                    .kerning(0.3)
+                    .textCase(.uppercase)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 28)
+                    .padding(.vertical, 13)
+                    .background(connectionState == .checking ? accent.opacity(0.5) : accent)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+                .disabled(connectionState == .checking)
+
+                HStack(spacing: 6) {
+                    Rectangle().fill(tone.line).frame(height: 0.5)
+                    Text(s.orDivider).font(.system(size: 12)).foregroundStyle(tone.textMuted).fixedSize()
+                    Rectangle().fill(tone.line).frame(height: 0.5)
+                }
+                .padding(.horizontal, 24)
+
+                Text(s.offlineFooter)
+                    .font(.system(size: 13))
+                    .foregroundStyle(tone.textMuted)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(3)
+            }
+            .padding(.horizontal, 36)
+            Spacer()
+        }
     }
 }
 
