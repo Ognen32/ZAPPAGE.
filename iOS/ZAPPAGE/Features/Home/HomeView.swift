@@ -52,6 +52,7 @@ enum ConnectionState {
 // MARK: - HomeView
 struct HomeView: View {
     var onSignOut: () -> Void = {}
+    @State private var session = UserSession()
     @State private var route: HomeRoute = .home
     @State private var menuOpen = false
     @AppStorage("backendIP") private var backendIP: String = ""
@@ -65,6 +66,7 @@ struct HomeView: View {
                 tone: tone,
                 route: route,
                 menuOpen: $menuOpen,
+                hero: session.hero,
                 connectionState: connectionState,
                 onConnectionTap: {
                     if connectionState == .online { connectionState = .idle }
@@ -94,7 +96,7 @@ struct HomeView: View {
                 }
 
                 if menuOpen {
-                    UserMenuDropdown(tone: tone, route: $route, menuOpen: $menuOpen, connectionState: connectionState, onSignOut: onSignOut)
+                    UserMenuDropdown(tone: tone, route: $route, menuOpen: $menuOpen, hero: session.hero, username: session.username, email: session.email, connectionState: connectionState, onSignOut: onSignOut)
                         .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .topTrailing))
                             .combined(with: .offset(y: -6)))
                         .padding(.trailing, 20)
@@ -105,6 +107,7 @@ struct HomeView: View {
         .background(tone.bg)
         .ignoresSafeArea(edges: .top)
         .animation(.easeOut(duration: 0.14), value: menuOpen)
+        .task { await session.load() }
     }
 
     // MARK: - Home feed sections
@@ -147,6 +150,7 @@ private struct HomeBrandBar: View {
     let tone: ZapTheme.Tone
     let route: HomeRoute
     @Binding var menuOpen: Bool
+    let hero: ZapTheme.HeroKind
     let connectionState: ConnectionState
     let onConnectionTap: () -> Void
     private let accent = ZapTheme.accent
@@ -165,7 +169,7 @@ private struct HomeBrandBar: View {
                             RoundedRectangle(cornerRadius: 12)
                                 .stroke(menuOpen ? accent : tone.chipBorder, lineWidth: 0.5)
                         )
-                    ChibiHero(kind: .zap, accent: accent, inverted: menuOpen, size: 30)
+                    ChibiHero(kind: hero, accent: accent, inverted: menuOpen, size: 30)
                 }
                 .frame(width: 36, height: 36)
             }
@@ -211,6 +215,9 @@ private struct UserMenuDropdown: View {
     let tone: ZapTheme.Tone
     @Binding var route: HomeRoute
     @Binding var menuOpen: Bool
+    let hero: ZapTheme.HeroKind
+    let username: String
+    let email: String
     let connectionState: ConnectionState
     let onSignOut: () -> Void
     @AppStorage("backendIP") private var backendIP: String = ""
@@ -223,19 +230,20 @@ private struct UserMenuDropdown: View {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10)
                         .fill(accent)
-                    ChibiHero(kind: .zap, accent: accent, size: 36)
+                    ChibiHero(kind: hero, accent: accent, size: 36)
                 }
                 .frame(width: 36, height: 36)
                 .clipped()
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text("Kira Soto")
+                    Text(username.isEmpty ? "Reader" : username)
                         .font(.system(size: 13.5, weight: .semibold))
                         .foregroundStyle(tone.text)
                         .kerning(-0.15)
-                    Text("Premium · 247 issues")
+                    Text(email)
                         .font(.system(size: 11.5))
                         .foregroundStyle(tone.textDim)
+                        .lineLimit(1)
                 }
                 Spacer()
             }

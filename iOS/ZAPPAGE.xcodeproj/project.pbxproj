@@ -7,7 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		15DEFE102FC4FF2B008D89E1 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 15DEFE0F2FC4FF2B008D89E1 /* GoogleService-Info.plist */; };
+		159816492FC6438800AF22B2 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = 159816482FC6438800AF22B2 /* GoogleSignIn */; };
+		1598164B2FC6455A00AF22B2 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 1598164A2FC6455A00AF22B2 /* GoogleService-Info.plist */; };
+		159816502FC651FE00AF22B2 /* FacebookLogin in Frameworks */ = {isa = PBXBuildFile; productRef = 1598164F2FC651FE00AF22B2 /* FacebookLogin */; };
 		15DEFE132FC50056008D89E1 /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = 15DEFE122FC50056008D89E1 /* FirebaseAuth */; };
 		15DEFE152FC50056008D89E1 /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = 15DEFE142FC50056008D89E1 /* FirebaseFirestore */; };
 /* End PBXBuildFile section */
@@ -33,12 +35,25 @@
 		151936FE2FC1216B0072B31C /* ZAPPAGE.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ZAPPAGE.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1519370B2FC1216C0072B31C /* ZAPPAGETests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ZAPPAGETests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		151937152FC1216C0072B31C /* ZAPPAGEUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ZAPPAGEUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		15DEFE0F2FC4FF2B008D89E1 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
+		1598164A2FC6455A00AF22B2 /* GoogleService-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "GoogleService-Info.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		1598164D2FC6464E00AF22B2 /* Exceptions for "ZAPPAGE" folder in "ZAPPAGE" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 151936FD2FC1216B0072B31C /* ZAPPAGE */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		151937002FC1216B0072B31C /* ZAPPAGE */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				1598164D2FC6464E00AF22B2 /* Exceptions for "ZAPPAGE" folder in "ZAPPAGE" target */,
+			);
 			path = ZAPPAGE;
 			sourceTree = "<group>";
 		};
@@ -59,8 +74,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				159816502FC651FE00AF22B2 /* FacebookLogin in Frameworks */,
 				15DEFE132FC50056008D89E1 /* FirebaseAuth in Frameworks */,
 				15DEFE152FC50056008D89E1 /* FirebaseFirestore in Frameworks */,
+				159816492FC6438800AF22B2 /* GoogleSignIn in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -84,7 +101,7 @@
 		151936F52FC1216B0072B31C = {
 			isa = PBXGroup;
 			children = (
-				15DEFE0F2FC4FF2B008D89E1 /* GoogleService-Info.plist */,
+				1598164A2FC6455A00AF22B2 /* GoogleService-Info.plist */,
 				151937002FC1216B0072B31C /* ZAPPAGE */,
 				1519370E2FC1216C0072B31C /* ZAPPAGETests */,
 				151937182FC1216C0072B31C /* ZAPPAGEUITests */,
@@ -124,6 +141,8 @@
 			packageProductDependencies = (
 				15DEFE122FC50056008D89E1 /* FirebaseAuth */,
 				15DEFE142FC50056008D89E1 /* FirebaseFirestore */,
+				159816482FC6438800AF22B2 /* GoogleSignIn */,
+				1598164F2FC651FE00AF22B2 /* FacebookLogin */,
 			);
 			productName = ZAPPAGE;
 			productReference = 151936FE2FC1216B0072B31C /* ZAPPAGE.app */;
@@ -209,6 +228,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				15DEFE112FC50056008D89E1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+				159816472FC6438800AF22B2 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+				1598164E2FC651FE00AF22B2 /* XCRemoteSwiftPackageReference "facebook-ios-sdk" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 151936FF2FC1216B0072B31C /* Products */;
@@ -227,7 +248,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				15DEFE102FC4FF2B008D89E1 /* GoogleService-Info.plist in Resources */,
+				1598164B2FC6455A00AF22B2 /* GoogleService-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -416,6 +437,7 @@
 				DEVELOPMENT_TEAM = 2DDLK77NUD;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ZAPPAGE/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -448,6 +470,7 @@
 				DEVELOPMENT_TEAM = 2DDLK77NUD;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ZAPPAGE/Info.plist;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -596,6 +619,22 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		159816472FC6438800AF22B2 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 9.1.0;
+			};
+		};
+		1598164E2FC651FE00AF22B2 /* XCRemoteSwiftPackageReference "facebook-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/facebook/facebook-ios-sdk";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
 		15DEFE112FC50056008D89E1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
@@ -607,6 +646,16 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		159816482FC6438800AF22B2 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 159816472FC6438800AF22B2 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+		1598164F2FC651FE00AF22B2 /* FacebookLogin */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1598164E2FC651FE00AF22B2 /* XCRemoteSwiftPackageReference "facebook-ios-sdk" */;
+			productName = FacebookLogin;
+		};
 		15DEFE122FC50056008D89E1 /* FirebaseAuth */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 15DEFE112FC50056008D89E1 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;

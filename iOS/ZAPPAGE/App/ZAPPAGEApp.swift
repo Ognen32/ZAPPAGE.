@@ -1,6 +1,8 @@
 import SwiftUI
 import FirebaseCore
 import FirebaseAuth
+import GoogleSignIn
+import FacebookCore
 
 @main
 struct ZAPPAGEApp: App {
@@ -8,17 +10,24 @@ struct ZAPPAGEApp: App {
 
     init() {
         FirebaseApp.configure()
+        if let clientID = FirebaseApp.app()?.options.clientID {
+            GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
+        }
         _isAuthenticated = State(initialValue: Auth.auth().currentUser != nil)
     }
 
     var body: some Scene {
         WindowGroup {
-            if isAuthenticated {
-                HomeView(onSignOut: { isAuthenticated = false })
-            } else {
-                AuthView {
-                    isAuthenticated = true
+            Group {
+                if isAuthenticated {
+                    HomeView(onSignOut: { isAuthenticated = false })
+                } else {
+                    AuthView { isAuthenticated = true }
                 }
+            }
+            .onOpenURL { url in
+                GIDSignIn.sharedInstance.handle(url)
+                ApplicationDelegate.shared.application(UIApplication.shared, open: url, options: [:])
             }
         }
     }

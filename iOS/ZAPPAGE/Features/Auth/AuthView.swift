@@ -3,6 +3,7 @@ import SwiftUI
 struct AuthView: View {
     @State private var vm = AuthViewModel()
     @State private var showSuccess = false
+    @State private var showGoogleSetup = false
     @AppStorage("zapLanguage") private var languageRaw: String = ZapLanguage.english.rawValue
     @Environment(\.colorScheme) private var scheme
 
@@ -36,12 +37,22 @@ struct AuthView: View {
             .scrollDismissesKeyboard(.interactively)
             .blur(radius: showSuccess ? 8 : 0)
 
+            if showGoogleSetup {
+                GoogleProfileSetupOverlay(vm: vm, tone: tone, accent: accent) {
+                    showGoogleSetup = false
+                    withAnimation(.spring(response: 0.45, dampingFraction: 0.7)) { showSuccess = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { onAuthenticated?() }
+                }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+
             if showSuccess {
                 AuthSuccessOverlay()
                     .transition(.opacity)
             }
         }
         .animation(.easeInOut(duration: 0.35), value: showSuccess)
+        .animation(.spring(response: 0.4, dampingFraction: 0.85), value: showGoogleSetup)
     }
 
     // MARK: - Brand bar + language toggle
@@ -209,10 +220,26 @@ struct AuthView: View {
     private var socialRow: some View {
         HStack(spacing: 10) {
             SocialButton(icon: AnyView(FacebookSignInIcon()), label: "Facebook", tone: tone) {
-                vm.signInWithFacebook(); onAuthenticated?()
+                vm.signInWithFacebook(
+                    onSuccess: {
+                        withAnimation(.spring(response: 0.45, dampingFraction: 0.7)) { showSuccess = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { onAuthenticated?() }
+                    },
+                    onNeedsProfile: {
+                        withAnimation { showGoogleSetup = true }
+                    }
+                )
             }
             SocialButton(icon: AnyView(GoogleSignInIcon()), label: "Google", tone: tone) {
-                vm.signInWithGoogle(); onAuthenticated?()
+                vm.signInWithGoogle(
+                    onSuccess: {
+                        withAnimation(.spring(response: 0.45, dampingFraction: 0.7)) { showSuccess = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { onAuthenticated?() }
+                    },
+                    onNeedsProfile: {
+                        withAnimation { showGoogleSetup = true }
+                    }
+                )
             }
         }
     }
@@ -609,6 +636,100 @@ private struct AuthSuccessOverlay: View {
                 subtitleOpacity = 1
             }
         }
+    }
+}
+
+// MARK: - Google profile setup (new Google users only)
+private struct GoogleProfileSetupOverlay: View {
+    @Bindable var vm: AuthViewModel
+    let tone: ZapTheme.Tone
+    let accent: Color
+    let onComplete: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            Color.black.opacity(0.55)
+                .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(tone.textMuted)
+                    .frame(width: 36, height: 4)
+                    .padding(.top, 12)
+                    .padding(.bottom, 28)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    (Text("ONE MORE ")
+                        .font(ZapTheme.archivoBlack(26))
+                        .foregroundStyle(tone.text)
+                    + Text("THING")
+                        .font(ZapTheme.archivoBlack(26))
+                        .foregroundStyle(accent)
+                    + Text(".")
+                        .font(ZapTheme.archivoBlack(26))
+                        .foregroundStyle(tone.text))
+                    .kerning(-0.6)
+
+                    Text("Pick a username and your hero to finish setting up your account.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(tone.textDim)
+                        .lineSpacing(3)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
+
+                ZapTextField(icon: "person", placeholder: "Username",
+                             text: $vm.username, tone: tone, accent: accent)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 16)
+
+                HeroPickerRow(selected: $vm.selectedHero, label: "CHOOSE YOUR HERO",
+                              tone: tone, accent: accent)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 16)
+
+                if let error = vm.errorMessage {
+                    Text(error)
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(Color(hex: "#E63946"))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 8)
+                }
+
+                Group {
+                    if vm.isLoading {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                .scaleEffect(0.85)
+                            Text("Saving…")
+                                .font(ZapTheme.archivoBlack(13))
+                                .kerning(0.4)
+                                .textCase(.uppercase)
+                                .foregroundStyle(.white)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 52)
+                        .background(accent.opacity(0.75))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    } else {
+                        PrimaryButton(label: "LET'S GO", accent: accent) {
+                            vm.completeGoogleProfile(onSuccess: onComplete)
+                        }
+                    }
+                }
+                .padding(.horizontal, 24)
+                .animation(.easeInOut(duration: 0.18), value: vm.isLoading)
+
+                Spacer().frame(height: 40)
+            }
+            .background(tone.bg)
+            .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        }
+        .ignoresSafeArea()
+        .onAppear { vm.errorMessage = nil }
     }
 }
 
