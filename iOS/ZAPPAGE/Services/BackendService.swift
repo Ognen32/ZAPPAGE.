@@ -4,6 +4,26 @@ struct BackendService {
     let ip: String
     private var base: String { "http://\(ip.trimmingCharacters(in: .whitespaces))" }
 
+    func browse(category: String, page: Int = 1) async throws -> BrowseResponse {
+        let path: String
+        switch category {
+        case "DC":            path = "/comics/dc"
+        case "Marvel":        path = "/comics/marvel"
+        case "Indie Week":    path = "/comics/indie-week"
+        case "Europe Comics": path = "/comics/tag?tag=europe-comics"
+        case "Other":         path = "/comics/other"
+        default:              path = "/comics/all"
+        }
+        let sep = path.contains("?") ? "&" : "?"
+        guard let url = URL(string: "\(base)\(path)\(sep)page=\(page)") else { throw URLError(.badURL) }
+        let (data, _) = try await URLSession.shared.data(from: url)
+        let raw = try JSONDecoder().decode(RawBrowseResponse.self, from: data)
+        let pagination = (raw.pagination ?? [])
+            .enumerated()
+            .compactMap { APIPaginationItem.from($0.element, index: $0.offset) }
+        return BrowseResponse(page: raw.page, comics: raw.comics, pagination: pagination)
+    }
+
     func search(query: String, page: Int = 1) async throws -> SearchResponse {
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
         guard let url = URL(string: "\(base)/comics/search?q=\(encoded)&page=\(page)") else {
@@ -11,6 +31,13 @@ struct BackendService {
         }
         let (data, _) = try await URLSession.shared.data(from: url)
         return try parseSearch(data)
+    }
+
+    func scrape(comicURL: String) async throws -> ScrapedComicDetail {
+        let encoded = comicURL.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? comicURL
+        guard let url = URL(string: "\(base)/comic/scrape?url=\(encoded)") else { throw URLError(.badURL) }
+        let (data, _) = try await URLSession.shared.data(from: url)
+        return try JSONDecoder().decode(ScrapedComicDetail.self, from: data)
     }
 
     private func parseSearch(_ data: Data) throws -> SearchResponse {
@@ -26,6 +53,12 @@ struct BackendService {
             pagination: pagination
         )
     }
+}
+
+private struct RawBrowseResponse: Decodable {
+    let page: Int
+    let comics: [APIComic]
+    let pagination: [RawPaginationItem]?
 }
 
 private struct RawSearchResponse: Decodable {

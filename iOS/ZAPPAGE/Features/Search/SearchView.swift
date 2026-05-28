@@ -5,6 +5,7 @@ struct SearchView: View {
     let s: ZapStrings
     let backendIP: String
     let onDismiss: () -> Void
+    var onSelect: (APIComic) -> Void = { _ in }
 
     @State private var query = ""
     @State private var results: [APIComic] = []
@@ -95,7 +96,10 @@ struct SearchView: View {
         let cols = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
         return LazyVGrid(columns: cols, spacing: 8) {
             ForEach(results) { comic in
-                SearchResultCard(comic: comic, tone: tone, accent: accent)
+                Button { onSelect(comic) } label: {
+                    SearchResultCard(comic: comic, tone: tone, accent: accent)
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 16)

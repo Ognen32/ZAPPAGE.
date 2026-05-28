@@ -79,9 +79,14 @@ struct HomeView: View {
     @AppStorage("zapLanguage") private var languageRaw: String = ZapLanguage.english.rawValue
     @State private var connectionState: ConnectionState = .idle
     @State private var searchActive = false
+    @State private var selectedPublisher = "Home"
+    @State private var dcNewComics: [APIComic] = []
+    @State private var marvelNewComics: [APIComic] = []
     @State private var showDocPicker = false
     @State private var cbzPages: [CBZPage] = []
     @State private var showReader = false
+    @State private var selectedComic: APIComic? = nil
+    private var library: LibraryStore { LibraryStore.shared }
     @Environment(\.colorScheme) private var scheme
     private var tone: ZapTheme.Tone { scheme == .dark ? ZapTheme.dark : ZapTheme.light }
     private var language: ZapLanguage { ZapLanguage(rawValue: languageRaw) ?? .english }
@@ -109,7 +114,8 @@ struct HomeView: View {
                         case .home:
                             if connectionState == .online { homeSections }
                         default:
-                            SubPageView(route: route, tone: tone, s: s)
+                            SubPageView(route: route, tone: tone, s: s,
+                                        onOpenLibraryComic: openLibraryComic)
                         }
                         Spacer().frame(height: 32)
                     }
@@ -147,7 +153,8 @@ struct HomeView: View {
                         tone: tone,
                         s: s,
                         backendIP: backendIP,
-                        onDismiss: { withAnimation(.easeOut(duration: 0.2)) { searchActive = false } }
+                        onDismiss: { withAnimation(.easeOut(duration: 0.2)) { searchActive = false; selectedPublisher = "Home" } },
+                        onSelect: { selectedComic = $0 }
                     )
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .zIndex(10)
@@ -158,6 +165,9 @@ struct HomeView: View {
         .ignoresSafeArea(edges: .top)
         .animation(.easeOut(duration: 0.14), value: menuOpen)
         .task { await session.load() }
+        .onChange(of: connectionState) { _, new in
+            if new == .online { fetchNewComics() }
+        }
         .sheet(isPresented: $showDocPicker) {
             DocumentPicker { url in
                 // Acquire scope now, while the picker callback is still active,
@@ -177,6 +187,9 @@ struct HomeView: View {
         .fullScreenCover(isPresented: $showReader) {
             CBZReaderView(pages: cbzPages)
         }
+        .fullScreenCover(item: $selectedComic) { comic in
+            ComicDetailView(comic: comic, backendIP: backendIP, tone: tone)
+        }
     }
 
     // MARK: - Home feed sections
@@ -185,16 +198,42 @@ struct HomeView: View {
         HomeSearchBar(tone: tone, s: s, onActivate: {
             withAnimation(.easeOut(duration: 0.2)) { searchActive = true }
         })
-        PublisherChips(tone: tone, s: s)
-        FeaturedHeroCard(comic: MockData.featured, tone: tone, s: s)
-        HomeSectionHeader(title: s.continueReading, tone: tone, s: s)
-        ContinueReadingRow(comics: MockData.continueReading, tone: tone)
-        HomeSectionHeader(title: s.newThisWeek, tone: tone, s: s)
-        NewThisWeekRow(comics: MockData.newThisWeek, tone: tone, s: s)
-        HomeSectionHeader(title: s.myLibrary, tone: tone, s: s)
-        MyLibraryList(comics: MockData.myLibrary, tone: tone, s: s)
-        HomeSectionHeader(title: s.trending, tone: tone, s: s)
-        TrendingList(comics: MockData.trending, tone: tone)
+        PublisherChips(tone: tone, s: s, active: $selectedPublisher)
+        if selectedPublisher == "Home" {
+            FeaturedHeroCard(comic: MockData.featured, tone: tone, s: s)
+            HomeSectionHeader(title: s.continueReading, tone: tone, s: s)
+            ContinueReadingRow(comics: MockData.continueReading, tone: tone)
+            HomeSectionHeader(title: s.newThisWeek, tone: tone, s: s, tag: "DC")
+            MarqueeComicsRow(comics: dcNewComics, scrollLeft: true, tone: tone, onSelect: { selectedComic = $0 })
+            HomeSectionHeader(title: s.newThisWeek, tone: tone, s: s, tag: "Marvel")
+            MarqueeComicsRow(comics: marvelNewComics, scrollLeft: false, tone: tone, onSelect: { selectedComic = $0 })
+            HomeSectionHeader(title: s.myLibrary, tone: tone, s: s)
+            DownloadedComicsRow(library: library, tone: tone, onOpen: openLibraryComic)
+            HomeSectionHeader(title: s.trending, tone: tone, s: s)
+            TrendingList(comics: MockData.trending, tone: tone)
+        } else {
+            BrowseView(publisher: selectedPublisher, backendIP: backendIP, tone: tone, onSelect: { selectedComic = $0 })
+        }
+    }
+
+    // MARK: - Open a locally downloaded comic in the reader
+    func openLibraryComic(_ comic: LibraryComic) {
+        let url = LibraryStore.shared.cbzURL(for: comic)
+        Task.detached(priority: .userInitiated) {
+            guard let pages = try? loadCBZPages(from: url), !pages.isEmpty else { return }
+            await MainActor.run { cbzPages = pages; showReader = true }
+        }
+    }
+
+    // MARK: - New comics fetch
+    private func fetchNewComics() {
+        Task {
+            async let dc = try? BackendService(ip: backendIP).browse(category: "DC", page: 1)
+            async let marvel = try? BackendService(ip: backendIP).browse(category: "Marvel", page: 1)
+            let (dcResult, marvelResult) = await (dc, marvel)
+            dcNewComics = Array((dcResult?.comics ?? []).prefix(10))
+            marvelNewComics = Array((marvelResult?.comics ?? []).prefix(10))
+        }
     }
 
     // MARK: - Backend connection check
@@ -483,12 +522,13 @@ private struct SubPageView: View {
     let route: HomeRoute
     let tone: ZapTheme.Tone
     let s: ZapStrings
+    var onOpenLibraryComic: (LibraryComic) -> Void = { _ in }
     private let accent = ZapTheme.accent
+    private var library: LibraryStore { LibraryStore.shared }
 
-    private var comics: [MockComic] {
+    private var mockComics: [MockComic] {
         switch route {
         case .reading:    return MockData.continueReading
-        case .library:    return MockData.myLibrary
         case .favourites: return MockData.covers.filter { $0.isFavourite }
         case .read:       return MockData.covers.filter { $0.progress >= 1.0 }
         default:          return []
@@ -497,7 +537,6 @@ private struct SubPageView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // page header
             VStack(alignment: .leading, spacing: 4) {
                 Text(route.localLabel(s))
                     .font(ZapTheme.archivoBlack(26))
@@ -511,23 +550,23 @@ private struct SubPageView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
 
-            if comics.isEmpty {
+            if route == .library {
+                LibraryGridView(library: library, tone: tone, onOpen: onOpenLibraryComic)
+            } else if mockComics.isEmpty {
                 Text(s.nothingHere)
                     .font(.system(size: 14))
                     .foregroundStyle(tone.textMuted)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.top, 60)
             } else {
-                // 3-column grid
                 let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
                 LazyVGrid(columns: columns, spacing: 16) {
-                    ForEach(comics) { comic in
+                    ForEach(mockComics) { comic in
                         VStack(alignment: .leading, spacing: 6) {
                             ComicCoverCard(comic: comic,
                                            width: (UIScreen.main.bounds.width - 40 - 24) / 3,
                                            height: ((UIScreen.main.bounds.width - 40 - 24) / 3) * 1.4,
                                            accent: accent)
-
                             if route == .reading && comic.progress > 0 {
                                 ZStack(alignment: .leading) {
                                     RoundedRectangle(cornerRadius: 2).fill(tone.chipBg)
@@ -536,7 +575,6 @@ private struct SubPageView: View {
                                 }
                                 .frame(height: 3)
                             }
-
                             Text(comic.displayTitle)
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(tone.text)
@@ -591,24 +629,52 @@ private struct HomeSearchBar: View {
 private struct PublisherChips: View {
     let tone: ZapTheme.Tone
     let s: ZapStrings
-    @State private var active = "All"
+    @Binding var active: String
     private let accent = ZapTheme.accent
-    private let publishers = ["All","DC","Marvel","Image","Dark Horse","Boom!","IDW","Indie"]
+    private let publishers = ["Home", "All", "DC", "Marvel", "Indie Week", "Europe Comics", "Other"]
+
+    private let categories = ["All", "DC", "Marvel", "Indie Week", "Europe Comics", "Other"]
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(publishers, id: \.self) { pub in
-                    let on = pub == active
-                    Button { active = pub } label: {
-                        Text(pub == "All" ? s.allPublishers : pub)
-                            .font(ZapTheme.archivoBlack(12)).kerning(0.4).textCase(.uppercase)
-                            .foregroundStyle(on ? .white : tone.text)
-                            .padding(.horizontal, 14).padding(.vertical, 8)
-                            .background(on ? accent : tone.chipBg)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .overlay(RoundedRectangle(cornerRadius: 10).stroke(on ? accent : tone.chipBorder, lineWidth: 0.5))
-                    }.buttonStyle(.plain)
+            HStack(spacing: 0) {
+                // Home — icon pill, always first, distinct from browse chips
+                let homeOn = active == "Home"
+                Button { active = "Home" } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: homeOn ? "house.fill" : "house")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("HOME")
+                            .font(ZapTheme.archivoBlack(11)).kerning(0.6)
+                    }
+                    .foregroundStyle(homeOn ? .white : tone.text)
+                    .padding(.horizontal, 13).padding(.vertical, 8)
+                    .background(homeOn ? accent : tone.chipBg)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(homeOn ? accent : tone.chipBorder, lineWidth: 0.5))
+                }
+                .buttonStyle(.plain)
+
+                // Divider
+                Rectangle()
+                    .fill(tone.textMuted.opacity(0.4))
+                    .frame(width: 1.5, height: 26)
+                    .padding(.horizontal, 10)
+
+                // Browse category chips
+                HStack(spacing: 8) {
+                    ForEach(categories, id: \.self) { pub in
+                        let on = pub == active
+                        Button { active = pub } label: {
+                            Text(pub == "All" ? s.allPublishers : pub)
+                                .font(ZapTheme.archivoBlack(11)).kerning(0.4).textCase(.uppercase)
+                                .foregroundStyle(on ? .white : tone.textDim)
+                                .padding(.horizontal, 12).padding(.vertical, 8)
+                                .background(on ? accent : .clear)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .overlay(RoundedRectangle(cornerRadius: 10).stroke(on ? accent : tone.chipBorder, lineWidth: 0.5))
+                        }.buttonStyle(.plain)
+                    }
                 }
             }
             .padding(.horizontal, 20)
@@ -696,11 +762,22 @@ private struct HomeSectionHeader: View {
     let title: String
     let tone: ZapTheme.Tone
     let s: ZapStrings
+    var tag: String? = nil
+    private let accent = ZapTheme.accent
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title).font(ZapTheme.archivoBlack(18)).textCase(.uppercase).kerning(-0.2).foregroundStyle(tone.text)
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            Text(title)
+                .font(ZapTheme.archivoBlack(18)).textCase(.uppercase).kerning(-0.2)
+                .foregroundStyle(tone.text)
+            if let tag {
+                Text("  |  ")
+                    .font(ZapTheme.archivoBlack(14)).foregroundStyle(tone.textMuted)
+                Text(tag.uppercased())
+                    .font(ZapTheme.archivoBlack(18)).kerning(-0.2)
+                    .foregroundStyle(accent)
+            }
             Spacer()
-            Button(s.seeAll) { }.font(.system(size: 13, weight: .semibold)).foregroundStyle(ZapTheme.accent).kerning(-0.1)
+            Button(s.seeAll) { }.font(.system(size: 13, weight: .semibold)).foregroundStyle(accent).kerning(-0.1)
         }
         .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 10)
     }
@@ -875,6 +952,544 @@ private struct ServerConnectPrompt: View {
             }
             .padding(.horizontal, 36)
             Spacer()
+        }
+    }
+}
+
+// MARK: - Infinite marquee row
+// Pre-fetches ALL images before showing the animated strip so there are zero
+// mid-animation state changes that could reset the repeatForever offset.
+// Touch pauses the scroll; releasing resumes from the same position.
+private struct MarqueeComicsRow: View {
+    let comics: [APIComic]
+    let scrollLeft: Bool
+    let tone: ZapTheme.Tone
+    var onSelect: (APIComic) -> Void = { _ in }
+    private let accent = ZapTheme.accent
+    private let cardW: CGFloat = 128
+    private let cardH: CGFloat = 188
+    private let gap:   CGFloat = 10
+    private var step:  CGFloat { cardW + gap }
+    private var loopW: CGFloat { step * CGFloat(max(comics.count, 1)) }
+    private var duration: Double { Double(max(comics.count, 1)) * 12.0 }
+    private var startX: CGFloat { scrollLeft ?  20 : -(loopW - 20) }
+    private var endX:   CGFloat { scrollLeft ? -(loopW - 20) : 20 }
+
+    @State private var offset: CGFloat = 0
+    @State private var images: [String: UIImage] = [:]
+    @State private var imagesReady = false
+    @State private var shimmer = false
+    @State private var isPaused = false
+    @State private var pausedAt: CGFloat = 0
+    @State private var animStartTime: Date = .now
+    @State private var dragTranslation: CGFloat = 0
+
+    var body: some View {
+        Group {
+            if !imagesReady || comics.isEmpty {
+                skeleton.transition(.opacity)
+            } else {
+                Color.clear
+                    .overlay(alignment: .leading) {
+                        HStack(spacing: gap) {
+                            ForEach(Array((comics + comics).enumerated()), id: \.offset) { _, comic in
+                                MarqueeComicCard(
+                                    comic: comic, accent: accent,
+                                    width: cardW, height: cardH,
+                                    image: comic.coverImage.flatMap { images[$0] }
+                                )
+                                .onTapGesture { onSelect(comic) }
+                            }
+                        }
+                        .offset(x: offset + dragTranslation)
+                    }
+                    .clipped()
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                if !isPaused { pauseScroll() }
+                                dragTranslation = value.translation.width
+                            }
+                            .onEnded { value in
+                                pausedAt += value.translation.width
+                                dragTranslation = 0
+                                offset = pausedAt
+                                resumeScroll()
+                            }
+                    )
+                    .onAppear {
+                        offset = startX
+                        animStartTime = Date().addingTimeInterval(0.5)
+                        Task { @MainActor in
+                            try? await Task.sleep(for: .milliseconds(500))
+                            guard !isPaused else { return }
+                            withAnimation(.linear(duration: duration).repeatForever(autoreverses: false)) {
+                                offset = endX
+                            }
+                        }
+                    }
+                    .transition(.opacity)
+            }
+        }
+        .frame(height: cardH)
+        .animation(.easeInOut(duration: 0.3), value: imagesReady)
+        .task(id: comics.map { $0.coverImage ?? "" }.joined()) {
+            await MainActor.run { imagesReady = false; images = [:] }
+            await prefetchImages()
+        }
+    }
+
+    // Estimate the current animated position based on elapsed time
+    private var currentLiveX: CGFloat {
+        let elapsed = max(0, Date().timeIntervalSince(animStartTime))
+        let t = elapsed.truncatingRemainder(dividingBy: duration) / duration
+        return startX + (endX - startX) * CGFloat(t)
+    }
+
+    private func pauseScroll() {
+        guard !isPaused else { return }
+        isPaused = true
+        pausedAt = currentLiveX
+        withAnimation(.none) { offset = pausedAt }
+    }
+
+    private func resumeScroll() {
+        guard isPaused else { return }
+        isPaused = false
+        let totalDist = abs(Double(endX - startX))
+        let remaining = abs(Double(endX - pausedAt))
+        let remainDur = max(0.05, duration * remaining / totalDist)
+        withAnimation(.linear(duration: remainDur)) { offset = endX }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(remainDur))
+            guard !isPaused else { return }
+            offset = startX
+            animStartTime = Date()
+            withAnimation(.linear(duration: duration).repeatForever(autoreverses: false)) {
+                offset = endX
+            }
+        }
+    }
+
+    private var skeleton: some View {
+        // Mirror the real marquee layout so the cards pin to the leading edge.
+        Color.clear
+            .overlay(alignment: .leading) {
+                HStack(spacing: gap) {
+                    ForEach(0..<7, id: \.self) { i in
+                        ZStack(alignment: .bottom) {
+                            RoundedRectangle(cornerRadius: 9).fill(tone.chipBg)
+
+                            VStack(alignment: .leading, spacing: 5) {
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(tone.textMuted.opacity(0.5))
+                                    .frame(width: cardW * 0.45, height: 7)
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(tone.textMuted.opacity(0.28))
+                                    .frame(width: cardW - 12, height: 7)
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(tone.textMuted.opacity(0.2))
+                                    .frame(width: cardW * 0.65, height: 7)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            .padding(.horizontal, 6).padding(.vertical, 7)
+                            .background(Color(hex: "#0d0d14").opacity(0.65))
+                        }
+                        .frame(width: cardW, height: cardH)
+                        .clipShape(RoundedRectangle(cornerRadius: 9))
+                        .opacity(shimmer ? (i % 2 == 0 ? 0.4 : 0.55) : (i % 2 == 0 ? 0.85 : 0.7))
+                        .animation(
+                            .easeInOut(duration: 0.85)
+                                .repeatForever(autoreverses: true)
+                                .delay(Double(i) * 0.12),
+                            value: shimmer
+                        )
+                    }
+                }
+                .padding(.leading, 20)
+            }
+            .clipped()
+            .onAppear { shimmer = true }
+    }
+
+    private func prefetchImages() async {
+        var collected: [String: UIImage] = [:]
+        await withTaskGroup(of: (String, UIImage?).self) { group in
+            for comic in comics {
+                guard let urlStr = comic.coverImage,
+                      let url = URL(string: urlStr) else { continue }
+                group.addTask {
+                    guard let (data, _) = try? await URLSession.shared.data(from: url),
+                          let img = UIImage(data: data) else { return (urlStr, nil) }
+                    return (urlStr, img)
+                }
+            }
+            for await (urlStr, img) in group {
+                if let img { collected[urlStr] = img }
+            }
+        }
+        await MainActor.run {
+            images = collected
+            imagesReady = true
+        }
+    }
+}
+
+// MARK: - Marquee card — same visual design as SearchResultCard
+private struct MarqueeComicCard: View {
+    let comic: APIComic
+    let accent: Color
+    let width: CGFloat
+    let height: CGFloat
+    let image: UIImage?
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            if let img = image {
+                Image(uiImage: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: width, height: height)
+                    .clipped()
+            } else {
+                LinearGradient(colors: [Color(hex: "#1c1c2e"), Color(hex: "#0a0a14")],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                .frame(width: width, height: height)
+                .overlay(Image(systemName: "book.closed")
+                    .font(.system(size: 26)).foregroundStyle(.white.opacity(0.12)))
+            }
+
+            // Dark strip matching SearchResultCard
+            VStack(alignment: .leading, spacing: 4) {
+                if let pub = comic.publisher {
+                    Text(pub.uppercased())
+                        .font(.system(size: 9, weight: .black)).kerning(0.5)
+                        .foregroundStyle(accent).lineLimit(1)
+                }
+                Text(comic.title ?? "—")
+                    .font(.system(size: 8, weight: .heavy))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .textCase(.uppercase).kerning(-0.1).lineLimit(2).truncationMode(.tail)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.horizontal, 6).padding(.vertical, 6)
+            .background(Color(hex: "#0d0d14").opacity(0.95))
+        }
+        .frame(width: width, height: height)
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+        .overlay(alignment: .topTrailing) {
+            if let size = comic.size {
+                Text(size)
+                    .font(.system(size: 8, weight: .bold)).foregroundStyle(.white)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(accent).clipShape(RoundedRectangle(cornerRadius: 6))
+                    .padding(6)
+            }
+        }
+        .shadow(color: .black.opacity(0.45), radius: 6, x: 0, y: 3)
+    }
+}
+
+// MARK: - Browse view (publisher chip results)
+private struct BrowseView: View {
+    let publisher: String
+    let backendIP: String
+    let tone: ZapTheme.Tone
+    var onSelect: (APIComic) -> Void = { _ in }
+    private let accent = ZapTheme.accent
+
+    @State private var results: [APIComic] = []
+    @State private var pagination: [APIPaginationItem] = []
+    @State private var isLoading = false
+    @State private var currentPage = 1
+    @State private var browseTask: Task<Void, Never>?
+
+    var body: some View {
+        Group {
+            if isLoading && results.isEmpty {
+                ProgressView().tint(accent)
+                    .frame(maxWidth: .infinity).padding(.top, 60)
+            } else if results.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "books.vertical")
+                        .font(.system(size: 32)).foregroundStyle(tone.textMuted)
+                    Text("No comics found")
+                        .font(.system(size: 14)).foregroundStyle(tone.textMuted)
+                }
+                .frame(maxWidth: .infinity).padding(.top, 60)
+            } else {
+                let cols = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+                LazyVGrid(columns: cols, spacing: 8) {
+                    ForEach(results) { comic in
+                        Button { onSelect(comic) } label: {
+                            BrowseComicCard(comic: comic, tone: tone, accent: accent)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16).padding(.top, 14)
+
+                if !pagination.isEmpty { paginationBar }
+            }
+        }
+        .onAppear { load(page: 1) }
+        .onChange(of: publisher) { _, _ in results = []; pagination = []; load(page: 1) }
+    }
+
+    private var paginationBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(pagination) { item in
+                    switch item {
+                    case .page(let n, _):
+                        Button { load(page: n) } label: { pageChip(label: "\(n)", active: false) }
+                            .buttonStyle(.plain)
+                    case .current(let n):
+                        pageChip(label: "\(n)", active: true)
+                    case .dots:
+                        Text("…").font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(tone.textMuted).frame(width: 28, height: 32)
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+        .padding(.top, 20).padding(.bottom, 4)
+    }
+
+    private func pageChip(label: String, active: Bool) -> some View {
+        Text(label)
+            .font(ZapTheme.archivoBlack(12)).kerning(0.2)
+            .foregroundStyle(active ? .white : tone.text)
+            .frame(minWidth: 32, minHeight: 32).padding(.horizontal, 6)
+            .background(active ? accent : tone.chipBg)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(active ? accent : tone.chipBorder, lineWidth: 0.5))
+    }
+
+    private func load(page: Int) {
+        browseTask?.cancel()
+        isLoading = true
+        currentPage = page
+        browseTask = Task {
+            do {
+                let response = try await BackendService(ip: backendIP).browse(category: publisher, page: page)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    results = response.comics
+                    pagination = response.pagination
+                    currentPage = response.page
+                    isLoading = false
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                await MainActor.run { isLoading = false }
+            }
+        }
+    }
+}
+
+// MARK: - Browse comic card
+private struct BrowseComicCard: View {
+    let comic: APIComic
+    let tone: ZapTheme.Tone
+    let accent: Color
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            coverImage
+            VStack(alignment: .leading, spacing: 4) {
+                if let pub = comic.publisher {
+                    Text(pub.uppercased())
+                        .font(.system(size: 9, weight: .black)).kerning(0.5)
+                        .foregroundStyle(accent).lineLimit(1)
+                }
+                Text(comic.title ?? "—")
+                    .font(.system(size: 8, weight: .heavy))
+                    .foregroundStyle(.white.opacity(0.9))
+                    .textCase(.uppercase).kerning(-0.1)
+                    .lineLimit(2).truncationMode(.tail)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .padding(.horizontal, 4).padding(.vertical, 5)
+            .background(scheme == .dark ? Color(hex: "#0d0d14").opacity(0.95) : Color(hex: "#1a2040").opacity(0.93))
+
+            if let size = comic.size {
+                VStack {
+                    HStack {
+                        Spacer()
+                        Text(size)
+                            .font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+                            .padding(.horizontal, 7).padding(.vertical, 4)
+                            .background(accent).clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    Spacer()
+                }
+                .padding(6)
+            }
+        }
+        .aspectRatio(2/3, contentMode: .fit)
+        .clipShape(RoundedRectangle(cornerRadius: 9))
+        .shadow(color: .black.opacity(0.45), radius: 6, x: 0, y: 3)
+    }
+
+    private var coverImage: some View {
+        Group {
+            if let urlString = comic.coverImage, let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let img): img.resizable().aspectRatio(contentMode: .fill)
+                    default: placeholder
+                    }
+                }
+            } else { placeholder }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var placeholder: some View {
+        LinearGradient(colors: [Color(hex: "#1c1c2e"), Color(hex: "#0a0a14")],
+                       startPoint: .topLeading, endPoint: .bottomTrailing)
+        .overlay(Image(systemName: "book.closed").font(.system(size: 20)).foregroundStyle(.white.opacity(0.12)))
+    }
+}
+
+// MARK: - Library grid (full-page library sub-view)
+private struct LibraryGridView: View {
+    let library: LibraryStore
+    let tone: ZapTheme.Tone
+    var onOpen: (LibraryComic) -> Void = { _ in }
+    private let accent = ZapTheme.accent
+    private let colW: CGFloat = (UIScreen.main.bounds.width - 40 - 24) / 3
+
+    var body: some View {
+        if library.comics.isEmpty {
+            VStack(spacing: 12) {
+                Image(systemName: "arrow.down.to.line.circle")
+                    .font(.system(size: 36)).foregroundStyle(tone.textMuted)
+                Text("NO DOWNLOADS YET")
+                    .font(ZapTheme.archivoBlack(14)).foregroundStyle(tone.text)
+                Text("Download comics from the detail page\nand they'll appear here.")
+                    .font(.system(size: 13)).foregroundStyle(tone.textDim)
+                    .multilineTextAlignment(.center).lineSpacing(3)
+            }
+            .frame(maxWidth: .infinity).padding(.top, 60).padding(.horizontal, 32)
+        } else {
+            let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
+            LazyVGrid(columns: columns, spacing: 16) {
+                ForEach(library.comics) { comic in
+                    Button { onOpen(comic) } label: {
+                        LibraryComicCard(comic: comic, library: library,
+                                         width: colW, height: colW * 1.4, accent: accent, tone: tone)
+                    }.buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+}
+
+private struct LibraryComicCard: View {
+    let comic: LibraryComic
+    let library: LibraryStore
+    let width: CGFloat
+    let height: CGFloat
+    let accent: Color
+    let tone: ZapTheme.Tone
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ZStack(alignment: .bottom) {
+                Group {
+                    if let img = library.coverImage(for: comic) {
+                        Image(uiImage: img).resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        LinearGradient(colors: [Color(hex: "#1c1c2e"), Color(hex: "#0a0a14")],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing)
+                        .overlay(Image(systemName: "book.closed")
+                            .font(.system(size: 22)).foregroundStyle(.white.opacity(0.12)))
+                    }
+                }
+                .frame(width: width, height: height).clipped()
+
+                VStack(alignment: .leading, spacing: 3) {
+                    if let pub = comic.publisher {
+                        Text(pub.uppercased()).font(.system(size: 8, weight: .black))
+                            .foregroundStyle(accent).lineLimit(1)
+                    }
+                    Text(comic.title).font(.system(size: 7, weight: .heavy))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .textCase(.uppercase).lineLimit(2)
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .padding(.horizontal, 5).padding(.vertical, 5)
+                .background(Color(hex: "#0d0d14").opacity(0.95))
+            }
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: 9))
+            .shadow(color: .black.opacity(0.4), radius: 5, x: 0, y: 3)
+
+            Text(comic.title).font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(tone.text).lineLimit(1)
+            if let yr = comic.year {
+                Text(yr).font(.system(size: 9)).foregroundStyle(tone.textDim)
+            }
+        }
+    }
+}
+
+// MARK: - Inline recent-downloads row on home feed
+private struct DownloadedComicsRow: View {
+    let library: LibraryStore
+    let tone: ZapTheme.Tone
+    var onOpen: (LibraryComic) -> Void = { _ in }
+    private let accent = ZapTheme.accent
+
+    var body: some View {
+        if library.comics.isEmpty {
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.down.to.line.circle")
+                    .font(.system(size: 18)).foregroundStyle(tone.textMuted)
+                Text("Downloads will appear here after you save a comic.")
+                    .font(.system(size: 13)).foregroundStyle(tone.textMuted).lineSpacing(2)
+            }
+            .padding(.horizontal, 20).padding(.vertical, 12)
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    ForEach(library.comics.prefix(10)) { comic in
+                        Button { onOpen(comic) } label: {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ZStack(alignment: .bottom) {
+                                    Group {
+                                        if let img = library.coverImage(for: comic) {
+                                            Image(uiImage: img).resizable().aspectRatio(contentMode: .fill)
+                                        } else {
+                                            LinearGradient(
+                                                colors: [Color(hex: "#1c1c2e"), Color(hex: "#0a0a14")],
+                                                startPoint: .topLeading, endPoint: .bottomTrailing)
+                                        }
+                                    }
+                                    .frame(width: 80, height: 112).clipped()
+
+                                    LinearGradient(
+                                        colors: [.clear, .black.opacity(0.7)],
+                                        startPoint: .center, endPoint: .bottom)
+                                }
+                                .frame(width: 80, height: 112)
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                                Text(comic.title).font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(tone.text).lineLimit(1).frame(width: 80, alignment: .leading)
+                                Text(comic.publisher ?? comic.year ?? "—")
+                                    .font(.system(size: 9)).foregroundStyle(tone.textDim)
+                            }
+                        }.buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
         }
     }
 }

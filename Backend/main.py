@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 import os
 import time
@@ -154,6 +155,13 @@ async def list_indie_week_comics(page: int = Query(1, ge=1)):
     return {"page": page, "comics": parse_comics(soup), "pagination": parse_pagination(soup)}
 
 
+@app.get("/comics/other")
+async def list_other_comics(page: int = Query(1, ge=1)):
+    url = f"{COMICS_BASE_URL}/cat/other-comics/" if page == 1 else f"{COMICS_BASE_URL}/cat/other-comics/page/{page}/"
+    soup = await fetch(url)
+    return {"page": page, "comics": parse_comics(soup), "pagination": parse_pagination(soup)}
+
+
 @app.get("/comics/tag")
 async def list_tag_comics(tag: str = Query(..., description="Tag slug, e.g. europe-comics"), page: int = Query(1, ge=1)):
     url = f"{COMICS_BASE_URL}/tag/{tag}/" if page == 1 else f"{COMICS_BASE_URL}/tag/{tag}/page/{page}/"
@@ -239,3 +247,97 @@ async def scrape_comic(url: str = Query(..., description="Full getcomics.org pag
         "downloadable": download_url is not None,
         "message": None if download_url else "No download available for this comic.",
     }
+
+
+@app.get("/comic/download")
+async def download_comic(url: str = Query(..., description="Direct download URL scraped from comic page")):
+    print(f"\n{'='*60}")
+    print(f"[DOWNLOAD] Request received")
+    print(f"[DOWNLOAD] URL: {url}")
+
+    req_headers = {**HEADERS, "Referer": COMICS_BASE_URL + "/"}
+    client = httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(30.0, read=300.0))
+
+    try:
+        print(f"[DOWNLOAD] Opening stream from source...")
+        response = await client.send(httpx.Request("GET", url, headers=req_headers), stream=True)
+        print(f"[DOWNLOAD] Status: {response.status_code}")
+        for k, v in response.headers.items():
+            print(f"           {k}: {v}")
+    except httpx.RequestError as exc:
+        await client.aclose()
+        print(f"[DOWNLOAD] Connection error: {exc}")
+        raise HTTPException(status_code=502, detail=f"Download failed: {exc}")
+
+    if response.status_code != 200:
+        await response.aclose()
+        await client.aclose()
+        raise HTTPException(status_code=response.status_code, detail="Source returned an error")
+
+    # Extract filename from Content-Disposition
+    filename = "comic.cbz"
+    cd = response.headers.get("content-disposition", "")
+    if cd:
+        m = re.search(r'filename\*?=["\']?(?:UTF-\d+\'\')?([^"\'\n;]+)["\']?', cd, re.IGNORECASE)
+        if m:
+            filename = m.group(1).strip().strip('"\'')
+    if not filename.lower().endswith(".cbz"):
+        base = filename.rsplit(".", 1)[0] if "." in filename else filename
+        filename = base + ".cbz"
+    print(f"[DOWNLOAD] Filename: {filename}")
+
+    content_length = response.headers.get("content-length")
+    print(f"[DOWNLOAD] Content-Length: {content_length or 'unknown'}")
+
+    # Create iterator once — we pause after first chunk, then continue the same iterator in stream_body
+    byte_iter = response.aiter_bytes(65536)
+    try:
+        first_chunk = await byte_iter.__anext__()
+    except StopAsyncIteration:
+        await response.aclose()
+        await client.aclose()
+        raise HTTPException(status_code=502, detail="Empty response from source")
+    except httpx.RequestError as exc:
+        await response.aclose()
+        await client.aclose()
+        raise HTTPException(status_code=502, detail=f"Failed to read source: {exc}")
+
+    magic = first_chunk[:4]
+    print(f"[DOWNLOAD] First chunk: {len(first_chunk)} bytes, magic={magic.hex()} ({magic})")
+
+    if len(first_chunk) < 4 or magic not in (b"PK\x03\x04", b"PK\x05\x06"):
+        await response.aclose()
+        await client.aclose()
+        print(f"[DOWNLOAD] ERROR: not a ZIP/CBZ — rejecting with 415")
+        raise HTTPException(status_code=415, detail="Unsupported format: file is not a CBZ/ZIP archive")
+
+    print(f"[DOWNLOAD] Magic bytes OK — streaming directly to iOS (no temp file)")
+
+    async def stream_body():
+        chunk_count = 1
+        total_bytes = len(first_chunk)
+        try:
+            yield first_chunk
+            async for chunk in byte_iter:  # continue the SAME iterator, not a new one
+                chunk_count += 1
+                total_bytes += len(chunk)
+                if chunk_count % 10 == 0:
+                    print(f"[DOWNLOAD→iOS] {chunk_count} chunks, {total_bytes/1024/1024:.2f} MB streamed")
+                yield chunk
+            print(f"[DOWNLOAD→iOS] Done: {chunk_count} chunks, {total_bytes/1024/1024:.2f} MB total")
+        except Exception as exc:
+            print(f"[DOWNLOAD→iOS] Stream error: {exc}")
+            raise
+        finally:
+            await response.aclose()
+            await client.aclose()
+            print(f"[DOWNLOAD] Connection closed")
+
+    resp_headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"',
+        "X-Comic-Filename": filename,
+    }
+    if content_length:
+        resp_headers["Content-Length"] = content_length
+
+    return StreamingResponse(stream_body(), media_type="application/zip", headers=resp_headers)

@@ -66,3 +66,29 @@ struct SearchResponse {
     let comics: [APIComic]
     let pagination: [APIPaginationItem]
 }
+
+struct BrowseResponse {
+    let page: Int
+    let comics: [APIComic]
+    let pagination: [APIPaginationItem]
+}
+
+struct ScrapedComicDetail: Decodable {
+    let title: String?
+    let coverImage: String?
+    let description: String?
+    let size: String?
+    let language: String?
+    let year: String?
+    let imageFormat: String?
+    let downloadURL: String?
+    let downloadable: Bool
+    let message: String?
+
+    enum CodingKeys: String, CodingKey {
+        case title, description, size, language, year, message, downloadable
+        case coverImage  = "cover_image"
+        case imageFormat = "image_format"
+        case downloadURL = "download_url"
+    }
+}
