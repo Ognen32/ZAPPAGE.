@@ -1,12 +1,5 @@
 import SwiftUI
 
-private enum DownloadState: Equatable {
-    case idle
-    case downloading(Double)
-    case done
-    case failed(String)
-}
-
 struct ComicDetailView: View {
     let comic: APIComic
     let backendIP: String
@@ -17,13 +10,14 @@ struct ComicDetailView: View {
     @State private var coverImage: UIImage? = nil
     @State private var isLoadingDetail = true
     @State private var isFavourite = false
-    @State private var downloadState: DownloadState = .idle
     @State private var cbzPages: [CBZPage] = []
     @State private var showReader = false
     @State private var showDeleteConfirm = false
     private let accent = ZapTheme.accent
     private var library: LibraryStore { LibraryStore.shared }
+    private var dm: DownloadManager { DownloadManager.shared }
     private var savedComic: LibraryComic? { library.comics.first { $0.sourceURL == comic.url } }
+    private var thisDownload: DownloadItem? { dm.downloads[comic.url ?? ""] }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -47,7 +41,6 @@ struct ComicDetailView: View {
         .alert("Delete this comic?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) {
                 if let saved = savedComic { library.delete(saved) }
-                downloadState = .idle
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -285,7 +278,7 @@ struct ComicDetailView: View {
             if isLoadingDetail {
                 RoundedRectangle(cornerRadius: 12).fill(tone.chipBg).frame(height: 52)
 
-            } else if downloadState == .done || library.isDownloaded(sourceURL: comic.url) {
+            } else if library.isDownloaded(sourceURL: comic.url) {
                 Button { openReader() } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "book.fill").font(.system(size: 14, weight: .bold))
@@ -298,7 +291,8 @@ struct ComicDetailView: View {
                     .shadow(color: accent.opacity(0.45), radius: 14, x: 0, y: 5)
                 }.buttonStyle(.plain)
 
-            } else if case .downloading(let p) = downloadState {
+            } else if case .downloading = thisDownload?.status {
+                let p = thisDownload?.progress ?? 0
                 VStack(spacing: 6) {
                     HStack(spacing: 8) {
                         ProgressView().tint(.white).scaleEffect(0.8)
@@ -310,6 +304,7 @@ struct ComicDetailView: View {
                             RoundedRectangle(cornerRadius: 2).fill(.white.opacity(0.3))
                             RoundedRectangle(cornerRadius: 2).fill(.white)
                                 .frame(width: geo.size.width * CGFloat(p))
+                                .animation(.easeInOut(duration: 0.3), value: p)
                         }
                     }.frame(height: 3)
                 }
@@ -318,17 +313,18 @@ struct ComicDetailView: View {
                 .background(accent)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
-            } else if case .failed = downloadState {
-                Button { downloadState = .idle } label: {
+            } else if case .failed = thisDownload?.status {
+                Button { dm.dismiss(sourceURL: comic.url ?? "") } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "exclamationmark.triangle").font(.system(size: 14))
-                        Text("FAILED — TAP TO RETRY").font(ZapTheme.archivoBlack(11)).kerning(0.3)
+                        Text("FAILED — TAP TO DISMISS").font(ZapTheme.archivoBlack(11)).kerning(0.3)
                     }
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity).frame(height: 52)
                     .background(Color(hex: "#F04E2A"))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-                }.buttonStyle(.plain)
+                }
+                .buttonStyle(.plain)
 
             } else if let d = detail, d.downloadable, d.downloadURL != nil {
                 Button { startDownload() } label: {
@@ -359,33 +355,8 @@ struct ComicDetailView: View {
     }
 
     private func startDownload() {
-        print("=== [iOS] Download button tapped ===")
-        print("[iOS] detail loaded: \(detail != nil)")
-        print("[iOS] downloadURL  : \(detail?.downloadURL ?? "nil")")
-        guard let d = detail else {
-            print("[iOS] ABORT — detail is nil")
-            return
-        }
-        var safeChars = CharacterSet.urlQueryAllowed
-        safeChars.remove(charactersIn: "+=")
-        let encoded = (d.downloadURL ?? "")
-            .addingPercentEncoding(withAllowedCharacters: safeChars) ?? d.downloadURL ?? ""
-        print("[iOS] Encoded URL : \(encoded)")
-        print("====================================")
-        downloadState = .downloading(0.05)
-        Task {
-            do {
-                _ = try await DownloadService(backendIP: backendIP).download(
-                    comic: comic,
-                    detail: d,
-                    onProgress: { p in Task { @MainActor in downloadState = .downloading(p) } }
-                )
-                await MainActor.run { downloadState = .done }
-            } catch {
-                print("[iOS] Download error: \(error)")
-                await MainActor.run { downloadState = .failed(error.localizedDescription) }
-            }
-        }
+        guard let d = detail else { return }
+        dm.start(comic: comic, detail: d, backendIP: backendIP)
     }
 
     private func openReader() {

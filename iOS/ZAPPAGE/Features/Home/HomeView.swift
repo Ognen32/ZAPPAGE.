@@ -160,12 +160,21 @@ struct HomeView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                     .zIndex(10)
                 }
+
+                // Global download banner — floats above every page
+                DownloadBanner()
+                    .zIndex(50)
             }
         }
         .background(tone.bg)
         .ignoresSafeArea(edges: .top)
         .animation(.easeOut(duration: 0.14), value: menuOpen)
-        .task { await session.load() }
+        .task {
+            await session.load()
+            if let uid = Auth.auth().currentUser?.uid {
+                LibraryStore.shared.loadUserData(uid: uid)
+            }
+        }
         .onChange(of: connectionState) { _, new in
             if new == .online { fetchNewComics() }
         }
@@ -208,18 +217,22 @@ struct HomeView: View {
                 FeaturedReadingCard(comic: latest, library: library, tone: tone) { openLibraryComic(latest) }
                     .id(latest.id)
             } else {
-                FeaturedHeroCard(comic: MockData.featured, tone: tone, s: s)
+                WelcomeCard(hero: session.hero, username: session.username)
             }
-            HomeSectionHeader(title: s.continueReading, tone: tone, s: s)
+            HomeSectionHeader(title: s.continueReading, tone: tone, s: s,
+                              onSeeAll: { route = .reading })
             RealContinueReadingRow(library: library, tone: tone, onOpen: openLibraryComic)
-            HomeSectionHeader(title: s.newThisWeek, tone: tone, s: s, tag: "DC")
+            HomeSectionHeader(title: s.newThisWeek, tone: tone, s: s, tag: "DC",
+                              onSeeAll: { selectedPublisher = "DC" })
             MarqueeComicsRow(comics: dcNewComics, scrollLeft: true, tone: tone, onSelect: { selectedComic = $0 })
-            HomeSectionHeader(title: s.newThisWeek, tone: tone, s: s, tag: "Marvel")
+            HomeSectionHeader(title: s.newThisWeek, tone: tone, s: s, tag: "Marvel",
+                              onSeeAll: { selectedPublisher = "Marvel" })
             MarqueeComicsRow(comics: marvelNewComics, scrollLeft: false, tone: tone, onSelect: { selectedComic = $0 })
-            HomeSectionHeader(title: s.myLibrary, tone: tone, s: s)
+            HomeSectionHeader(title: s.myLibrary, tone: tone, s: s,
+                              onSeeAll: { route = .library })
             DownloadedComicsRow(library: library, tone: tone, onOpen: openLibraryComic)
-            HomeSectionHeader(title: s.trending, tone: tone, s: s)
-            TrendingList(comics: MockData.trending, tone: tone)
+//            HomeSectionHeader(title: s.trending, tone: tone, s: s)
+//            TrendingList(comics: MockData.trending, tone: tone)
         } else {
             BrowseView(publisher: selectedPublisher, backendIP: backendIP, tone: tone, onSelect: { selectedComic = $0 })
         }
@@ -503,6 +516,7 @@ private struct UserMenuDropdown: View {
             // Logout
             Button {
                 menuOpen = false
+                LibraryStore.shared.clearUserData()
                 try? FirebaseAuth.Auth.auth().signOut()
                 onSignOut()
             } label: {
@@ -954,6 +968,226 @@ private struct FeaturedReadingCard: View {
     }
 }
 
+// MARK: - Global download banner (collapsible, supports multiple downloads)
+
+private struct DownloadBanner: View {
+    private var dm: DownloadManager { DownloadManager.shared }
+    private let accent = ZapTheme.accent
+    private let cardW: CGFloat = 240
+
+    @State private var expanded = true
+
+    private var activeCount: Int { dm.downloads.values.filter { if case .downloading = $0.status { return true }; return false }.count }
+
+    var body: some View {
+        VStack {
+            Spacer()
+            HStack {
+                Spacer()
+                if dm.hasVisible {
+                    VStack(spacing: 0) {
+                        pill
+                        if expanded {
+                            downloadList
+                                .transition(.opacity.combined(with: .move(edge: .top)))
+                        }
+                    }
+                    .frame(width: cardW)
+                    .background(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(Color(hex: "#0e0e18"))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                                    .stroke(.white.opacity(0.1), lineWidth: 1)
+                            )
+                    )
+                    .shadow(color: .black.opacity(0.7), radius: 20, x: 0, y: 8)
+                    .shadow(color: accent.opacity(0.15), radius: 30, x: 0, y: 12)
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .transition(.scale(scale: 0.85, anchor: .bottomTrailing).combined(with: .opacity))
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 28)
+                    .animation(.spring(response: 0.36, dampingFraction: 0.78), value: expanded)
+                }
+            }
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: dm.hasVisible)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(dm.hasVisible)
+    }
+
+    // MARK: - Pill header
+
+    private var pill: some View {
+        Button {
+            withAnimation(.spring(response: 0.36, dampingFraction: 0.78)) { expanded.toggle() }
+        } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(accent.opacity(0.15)).frame(width: 30, height: 30)
+                    if activeCount > 0 {
+                        ProgressView().tint(accent).scaleEffect(0.65)
+                    } else {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 11, weight: .black))
+                            .foregroundStyle(Color(hex: "#4ade80"))
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("CURRENTLY DOWNLOADING")
+                        .font(.system(size: 8, weight: .bold)).kerning(0.9)
+                        .foregroundStyle(accent)
+                    if dm.downloads.count == 1, let first = dm.sortedDownloads.first {
+                        Text(first.info.title)
+                            .font(ZapTheme.archivoBlack(12)).foregroundStyle(.white).lineLimit(1)
+                    } else {
+                        Text("\(dm.downloads.count) comics")
+                            .font(ZapTheme.archivoBlack(12)).foregroundStyle(.white)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.35))
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10)
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Download list
+
+    private var downloadList: some View {
+        VStack(spacing: 0) {
+            Rectangle().fill(.white.opacity(0.07)).frame(height: 1)
+            ForEach(Array(dm.sortedDownloads.enumerated()), id: \.element.id) { idx, item in
+                if idx > 0 { Rectangle().fill(.white.opacity(0.06)).frame(height: 1) }
+                DownloadItemRow(item: item)
+            }
+        }
+    }
+}
+
+// MARK: - Single download item row
+
+private func publisherColor(for publisher: String?) -> Color {
+    guard let p = publisher?.lowercased() else { return ZapTheme.accent }
+    if p.contains("dc")     { return Color(hex: "#4A90D9") }  // blue
+    if p.contains("marvel") { return Color(hex: "#E23333") }  // red
+    return ZapTheme.accent                                      // orange
+}
+
+private struct DownloadItemRow: View {
+    let item: DownloadItem
+    private var dm: DownloadManager { DownloadManager.shared }
+    private let accent = ZapTheme.accent
+    @State private var coverImage: UIImage? = nil
+
+    var body: some View {
+        VStack(spacing: 10) {
+            // Comic info row
+            HStack(alignment: .center, spacing: 10) {
+                // Cover
+                Group {
+                    if let img = coverImage {
+                        Image(uiImage: img)
+                            .resizable().aspectRatio(contentMode: .fill)
+                            .frame(width: 44, height: 62)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    } else {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(.white.opacity(0.07))
+                            .frame(width: 44, height: 62)
+                            .overlay(Image(systemName: "photo")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.white.opacity(0.2)))
+                    }
+                }
+                .shadow(color: .black.opacity(0.4), radius: 4, x: 0, y: 2)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    if let pub = item.info.publisher {
+                        Text(pub.uppercased())
+                            .font(.system(size: 8, weight: .black)).kerning(0.5)
+                            .foregroundStyle(publisherColor(for: pub))
+                    }
+                    Text(item.info.title)
+                        .font(ZapTheme.archivoBlack(11)).foregroundStyle(.white).lineLimit(2)
+                    if let size = item.info.size {
+                        Text(size).font(.system(size: 9)).foregroundStyle(.white.opacity(0.3))
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                // Cancel / dismiss button
+                Button {
+                    if case .downloading = item.status { dm.cancel(sourceURL: item.id) }
+                    else { dm.dismiss(sourceURL: item.id) }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .black))
+                        .foregroundStyle(.white.opacity(0.45))
+                        .frame(width: 22, height: 22)
+                        .background(.white.opacity(0.08))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Progress / status
+            switch item.status {
+            case .downloading:
+                VStack(spacing: 5) {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(.white.opacity(0.1))
+                            Capsule()
+                                .fill(LinearGradient(
+                                    colors: [accent, accent.opacity(0.6)],
+                                    startPoint: .leading, endPoint: .trailing))
+                                .shadow(color: accent.opacity(0.65), radius: 4)
+                                .frame(width: max(8, geo.size.width * CGFloat(item.progress)))
+                                .animation(.easeInOut(duration: 0.4), value: item.progress)
+                        }
+                    }
+                    .frame(height: 4)
+                    HStack {
+                        Text("\(Int(item.progress * 100))%")
+                            .font(ZapTheme.archivoBlack(16)).foregroundStyle(.white)
+                        Spacer()
+                        Text("in progress")
+                            .font(.system(size: 9)).foregroundStyle(.white.opacity(0.3))
+                    }
+                }
+            case .done:
+                HStack(spacing: 5) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 12)).foregroundStyle(Color(hex: "#4ade80"))
+                    Text("Saved to Library")
+                        .font(.system(size: 11, weight: .semibold)).foregroundStyle(.white.opacity(0.6))
+                    Spacer()
+                }
+            case .failed(let msg):
+                HStack(spacing: 5) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12)).foregroundStyle(Color(hex: "#f87171"))
+                    Text(msg).font(.system(size: 10)).foregroundStyle(.white.opacity(0.55)).lineLimit(2)
+                }
+            }
+        }
+        .padding(12)
+        .task {
+            guard coverImage == nil,
+                  let urlStr = item.info.coverImageURL,
+                  let url = URL(string: urlStr),
+                  let (data, _) = try? await URLSession.shared.data(from: url) else { return }
+            await MainActor.run { coverImage = UIImage(data: data) }
+        }
+    }
+}
+
 // Samples a 50×50 downsample of the image, skips near-black/white/grey pixels,
 // buckets remaining colours and returns the most frequent saturated one.
 private func extractDominantColor(from image: UIImage) -> Color {
@@ -987,76 +1221,84 @@ private func extractDominantColor(from image: UIImage) -> Color {
 }
 
 // MARK: - Featured hero card
-private struct FeaturedHeroCard: View {
-    let comic: MockComic
-    let tone: ZapTheme.Tone
-    let s: ZapStrings
-    private let accent = ZapTheme.accent
-    @State private var pulse = false
+// MARK: - Welcome card (shown when no comic has been read yet)
+private struct WelcomeCard: View {
+    let hero: ZapTheme.HeroKind
+    let username: String
+    @State private var float = false
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            LinearGradient(colors: [Color(hex: comic.bgFrom), Color(hex: comic.bgTo)],
-                           startPoint: .init(x: 0.1, y: 0), endPoint: .init(x: 0.9, y: 1))
+        ZStack {
+            // Background gradient from the user's chosen hero
+            LinearGradient(
+                colors: [hero.bgFrom, hero.bgTo],
+                startPoint: .topLeading, endPoint: .bottomTrailing
+            )
+            // Dot grid texture
             Canvas { ctx, size in
-                let sp: CGFloat = 8, r: CGFloat = 0.55
-                for col in 0...Int(size.width/sp)+1 {
-                    for row in 0...Int(size.height/sp)+1 {
-                        ctx.fill(Path(ellipseIn: CGRect(x: CGFloat(col)*sp-r, y: CGFloat(row)*sp-r, width: r*2, height: r*2)),
-                                 with: .color(Color(hex: comic.fgAlt).opacity(0.18)))
+                let sp: CGFloat = 9, r: CGFloat = 0.55
+                for col in 0...Int(size.width / sp) + 1 {
+                    for row in 0...Int(size.height / sp) + 1 {
+                        ctx.fill(Path(ellipseIn: CGRect(
+                            x: CGFloat(col) * sp - r, y: CGFloat(row) * sp - r,
+                            width: r * 2, height: r * 2)),
+                            with: .color(.white.opacity(0.13)))
                     }
                 }
-            }.blendMode(.overlay)
-            RadialGradient(colors: [Color(hex: comic.fg).opacity(0.55), .clear],
-                           center: .init(x: 1.1, y: -0.25), startRadius: 0, endRadius: 180)
-
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 6) {
-                    Circle().fill(.white).frame(width: 6, height: 6)
-                        .opacity(pulse ? 0.5 : 1).scaleEffect(pulse ? 0.7 : 1)
-                        .animation(.easeInOut(duration: 0.8).repeatForever(), value: pulse)
-                    Text(s.pickUpWhere)
-                        .font(ZapTheme.archivoBlack(10)).kerning(0.8).textCase(.uppercase).foregroundStyle(.white)
-                }
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(accent).clipShape(RoundedRectangle(cornerRadius: 4))
-                .padding(14).onAppear { pulse = true }
-
-                Spacer()
-
-                HStack(alignment: .bottom, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(comic.title)
-                            .font(ZapTheme.archivoBlack(32)).foregroundStyle(Color(hex: comic.fg))
-                            .textCase(.uppercase).kerning(-0.8).lineLimit(2)
-                            .shadow(color: .black.opacity(0.45), radius: 0, x: 0, y: 2)
-                        Text("\(s.issueWord) \(comic.issue) · \(s.pageWord) \(comic.currentPage) \(s.ofWord) \(comic.pages) · \(Int(comic.progress*100))%")
-                            .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.85)).kerning(0.2)
-                        GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 2).fill(Color.black.opacity(0.4))
-                                RoundedRectangle(cornerRadius: 2).fill(accent).shadow(color: accent, radius: 4)
-                                    .frame(width: geo.size.width * comic.progress)
-                            }
-                        }.frame(height: 4)
-                    }
-                    Button { } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "play.fill").font(.system(size: 10))
-                            Text(s.resumeBtn).font(ZapTheme.archivoBlack(11)).kerning(0.4).textCase(.uppercase)
-                        }
-                        .foregroundStyle(Color(hex: "#0A0A0B"))
-                        .padding(.horizontal, 14).padding(.vertical, 8)
-                        .background(.white).clipShape(RoundedRectangle(cornerRadius: 10))
-                    }.buttonStyle(.plain).fixedSize()
-                }
-                .padding(14)
             }
+            // Top-right radial glow
+            RadialGradient(
+                colors: [.white.opacity(0.22), .clear],
+                center: .init(x: 1.05, y: -0.1),
+                startRadius: 0, endRadius: 210
+            )
+            .allowsHitTesting(false)
         }
         .frame(height: 220)
+        // Badge — top left
+        .overlay(alignment: .topLeading) {
+            HStack(spacing: 5) {
+                Image(systemName: "bolt.fill").font(.system(size: 8, weight: .black))
+                Text("ZAPPAGE").font(.system(size: 9, weight: .black)).kerning(1.2)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 9).padding(.vertical, 5)
+            .background(.white.opacity(0.18))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .padding(16)
+        }
+        // Chibi hero — bottom right, floating
+        .overlay(alignment: .bottomTrailing) {
+            ChibiHero(kind: hero, size: 150)
+                .offset(x: 6, y: float ? -7 : 5)
+                .animation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true), value: float)
+                .allowsHitTesting(false)
+        }
+        // Welcome text — bottom left
+        .overlay(alignment: .bottomLeading) {
+            VStack(alignment: .leading, spacing: 5) {
+                if !username.isEmpty {
+                    Text("HEY, \(username.uppercased())")
+                        .font(.system(size: 11, weight: .bold)).kerning(0.5)
+                        .foregroundStyle(.white.opacity(0.7))
+                }
+                Text("WELCOME TO\nZAPPAGE")
+                    .font(ZapTheme.archivoBlack(28)).kerning(-0.8).lineSpacing(1)
+                    .foregroundStyle(.white)
+                    .shadow(color: .black.opacity(0.25), radius: 0, x: 0, y: 2)
+                Text("Download your first comic\nto join the Zap.")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.65))
+                    .lineSpacing(3)
+                    .padding(.top, 2)
+            }
+            .frame(maxWidth: 210, alignment: .leading)
+            .padding(16)
+        }
         .clipShape(RoundedRectangle(cornerRadius: 18))
-        .shadow(color: .black.opacity(0.35), radius: 15, x: 0, y: 10)
+        .shadow(color: hero.bgFrom.opacity(0.5), radius: 22, x: 0, y: 10)
         .padding(.horizontal, 20).padding(.top, 14)
+        .onAppear { float = true }
     }
 }
 
@@ -1066,6 +1308,7 @@ private struct HomeSectionHeader: View {
     let tone: ZapTheme.Tone
     let s: ZapStrings
     var tag: String? = nil
+    var onSeeAll: (() -> Void)? = nil
     private let accent = ZapTheme.accent
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
@@ -1080,7 +1323,10 @@ private struct HomeSectionHeader: View {
                     .foregroundStyle(accent)
             }
             Spacer()
-            Button(s.seeAll) { }.font(.system(size: 13, weight: .semibold)).foregroundStyle(accent).kerning(-0.1)
+            if let onSeeAll {
+                Button(s.seeAll, action: onSeeAll)
+                    .font(.system(size: 13, weight: .semibold)).foregroundStyle(accent).kerning(-0.1)
+            }
         }
         .padding(.horizontal, 20).padding(.top, 20).padding(.bottom, 10)
     }

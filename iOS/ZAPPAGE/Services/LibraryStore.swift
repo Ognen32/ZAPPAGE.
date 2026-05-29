@@ -11,6 +11,9 @@ final class LibraryStore {
     var readComicIDs: Set<String> = []
     var readingProgress: [String: LocalReadingProgress] = [:]
 
+    // UID of the currently loaded user — drives UserDefaults key namespacing
+    private var currentUID: String?
+
     // MARK: - Directory layout (Documents/ZAPPAGELibrary/{comics,covers,meta})
 
     private static var base: URL {
@@ -19,17 +22,12 @@ final class LibraryStore {
     }
     static var comicsDir: URL { base.appendingPathComponent("comics") }
     static var coversDir: URL { base.appendingPathComponent("covers") }
-    private static var metaDir:   URL { base.appendingPathComponent("meta") }
+    private static var metaDir: URL { base.appendingPathComponent("meta") }
 
     private init() {
         createDirectories()
         load()
-        favouriteIDs  = Set(UserDefaults.standard.stringArray(forKey: "favouriteComicIDs") ?? [])
-        readComicIDs  = Set(UserDefaults.standard.stringArray(forKey: "readComicIDs") ?? [])
-        if let data = UserDefaults.standard.data(forKey: "readingProgress"),
-           let decoded = try? JSONDecoder().decode([String: LocalReadingProgress].self, from: data) {
-            readingProgress = decoded
-        }
+        // User-scoped data (favourites, read status, progress) loaded via loadUserData(uid:)
     }
 
     private func createDirectories() {
@@ -38,7 +36,36 @@ final class LibraryStore {
         }
     }
 
-    // MARK: - Load / Save / Delete
+    // MARK: - User session lifecycle
+
+    /// Call this right after the user signs in (or on HomeView appear).
+    func loadUserData(uid: String) {
+        currentUID = uid
+        favouriteIDs  = Set(UserDefaults.standard.stringArray(forKey: favKey(uid)) ?? [])
+        readComicIDs  = Set(UserDefaults.standard.stringArray(forKey: readKey(uid)) ?? [])
+        if let data    = UserDefaults.standard.data(forKey: progressKey(uid)),
+           let decoded = try? JSONDecoder().decode([String: LocalReadingProgress].self, from: data) {
+            readingProgress = decoded
+        } else {
+            readingProgress = [:]
+        }
+    }
+
+    /// Call this on sign-out to wipe in-memory user state.
+    func clearUserData() {
+        currentUID      = nil
+        favouriteIDs    = []
+        readComicIDs    = []
+        readingProgress = [:]
+    }
+
+    // MARK: - UserDefaults key helpers
+
+    private func favKey(_ uid: String)      -> String { "favouriteComicIDs_\(uid)" }
+    private func readKey(_ uid: String)     -> String { "readComicIDs_\(uid)" }
+    private func progressKey(_ uid: String) -> String { "readingProgress_\(uid)" }
+
+    // MARK: - Load / Save / Delete comics
 
     func load() {
         let fm = FileManager.default
@@ -72,26 +99,37 @@ final class LibraryStore {
         comics.removeAll { $0.id == comic.id }
     }
 
+    // MARK: - Favourites
+
     func toggleFavourite(id: String) {
         if favouriteIDs.contains(id) { favouriteIDs.remove(id) } else { favouriteIDs.insert(id) }
-        UserDefaults.standard.set(Array(favouriteIDs), forKey: "favouriteComicIDs")
+        guard let uid = currentUID else { return }
+        UserDefaults.standard.set(Array(favouriteIDs), forKey: favKey(uid))
     }
 
     func isFavourite(id: String) -> Bool { favouriteIDs.contains(id) }
 
+    // MARK: - Read status
+
     func toggleRead(id: String) {
         if readComicIDs.contains(id) { readComicIDs.remove(id) } else { readComicIDs.insert(id) }
-        UserDefaults.standard.set(Array(readComicIDs), forKey: "readComicIDs")
+        guard let uid = currentUID else { return }
+        UserDefaults.standard.set(Array(readComicIDs), forKey: readKey(uid))
     }
 
     func isRead(id: String) -> Bool { readComicIDs.contains(id) }
 
+    // MARK: - Reading progress
+
     func saveProgress(comicID: String, page: Int, total: Int) {
         readingProgress[comicID] = LocalReadingProgress(page: page, total: total, lastReadAt: Date())
+        guard let uid = currentUID else { return }
         if let data = try? JSONEncoder().encode(readingProgress) {
-            UserDefaults.standard.set(data, forKey: "readingProgress")
+            UserDefaults.standard.set(data, forKey: progressKey(uid))
         }
     }
+
+    // MARK: - Storage size
 
     var totalSizeBytes: Int64 {
         comics.reduce(0) { total, comic in
