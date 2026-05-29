@@ -23,6 +23,7 @@ enum ComicReadingMode: String, CaseIterable {
 
 struct CBZReaderView: View {
     let pages: [CBZPage]
+    let comicID: String
     private let spreadPairs: [[CBZPage]]
 
     @State private var currentPage  = 0
@@ -33,8 +34,9 @@ struct CBZReaderView: View {
     @Environment(\.dismiss) private var dismiss
     private let accent = ZapTheme.accent
 
-    init(pages: [CBZPage]) {
-        self.pages = pages
+    init(pages: [CBZPage], comicID: String) {
+        self.pages  = pages
+        self.comicID = comicID
         var pairs: [[CBZPage]] = []
         var i = 0
         while i < pages.count {
@@ -42,6 +44,8 @@ struct CBZReaderView: View {
             i += 2
         }
         self.spreadPairs = pairs
+        let saved = LibraryStore.shared.readingProgress[comicID]
+        _currentPage = State(initialValue: saved?.page ?? 0)
     }
 
     var body: some View {
@@ -63,6 +67,9 @@ struct CBZReaderView: View {
         .animation(.spring(response: 0.38, dampingFraction: 0.82), value: showPanel)
         .animation(.easeInOut(duration: 0.18), value: spreadZoomed)
         .onChange(of: mode) { _, _ in spreadZoomed = false }
+        .onDisappear {
+            LibraryStore.shared.saveProgress(comicID: comicID, page: currentPage, total: pages.count)
+        }
     }
 
     // MARK: - Single page

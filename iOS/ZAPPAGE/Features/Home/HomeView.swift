@@ -23,7 +23,7 @@ enum HomeRoute: String, CaseIterable {
         case .read:       return "checkmark.circle"
         }
     }
-    var badge: String? { self == .library ? "24" : nil }
+    var badge: String? { nil }
 
     func localLabel(_ s: ZapStrings) -> String {
         switch self {
@@ -84,6 +84,7 @@ struct HomeView: View {
     @State private var marvelNewComics: [APIComic] = []
     @State private var showDocPicker = false
     @State private var cbzPages: [CBZPage] = []
+    @State private var readerComicID: String = ""
     @State private var showReader = false
     @State private var selectedComic: APIComic? = nil
     private var library: LibraryStore { LibraryStore.shared }
@@ -185,7 +186,7 @@ struct HomeView: View {
             }
         }
         .fullScreenCover(isPresented: $showReader) {
-            CBZReaderView(pages: cbzPages)
+            CBZReaderView(pages: cbzPages, comicID: readerComicID)
         }
         .fullScreenCover(item: $selectedComic) { comic in
             ComicDetailView(comic: comic, backendIP: backendIP, tone: tone)
@@ -200,9 +201,17 @@ struct HomeView: View {
         })
         PublisherChips(tone: tone, s: s, active: $selectedPublisher)
         if selectedPublisher == "Home" {
-            FeaturedHeroCard(comic: MockData.featured, tone: tone, s: s)
+            if let latest = library.comics
+                .filter({ !library.isRead(id: $0.id) && (library.readingProgress[$0.id]?.total ?? 0) > 0 })
+                .sorted(by: { (library.readingProgress[$0.id]?.lastReadAt ?? .distantPast) > (library.readingProgress[$1.id]?.lastReadAt ?? .distantPast) })
+                .first {
+                FeaturedReadingCard(comic: latest, library: library, tone: tone) { openLibraryComic(latest) }
+                    .id(latest.id)
+            } else {
+                FeaturedHeroCard(comic: MockData.featured, tone: tone, s: s)
+            }
             HomeSectionHeader(title: s.continueReading, tone: tone, s: s)
-            ContinueReadingRow(comics: MockData.continueReading, tone: tone)
+            RealContinueReadingRow(library: library, tone: tone, onOpen: openLibraryComic)
             HomeSectionHeader(title: s.newThisWeek, tone: tone, s: s, tag: "DC")
             MarqueeComicsRow(comics: dcNewComics, scrollLeft: true, tone: tone, onSelect: { selectedComic = $0 })
             HomeSectionHeader(title: s.newThisWeek, tone: tone, s: s, tag: "Marvel")
@@ -221,7 +230,7 @@ struct HomeView: View {
         let url = LibraryStore.shared.cbzURL(for: comic)
         Task.detached(priority: .userInitiated) {
             guard let pages = try? loadCBZPages(from: url), !pages.isEmpty else { return }
-            await MainActor.run { cbzPages = pages; showReader = true }
+            await MainActor.run { cbzPages = pages; readerComicID = comic.id; showReader = true }
         }
     }
 
@@ -267,7 +276,7 @@ private struct HomeBrandBar: View {
     private let accent = ZapTheme.accent
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 14) {
             ZapWordmark(size: 28, textColor: tone.text, accent: accent, letterSpacing: -1.5)
             Spacer()
             ConnectionPill(state: connectionState, action: onConnectionTap)
@@ -283,7 +292,8 @@ private struct HomeBrandBar: View {
                         )
                     ChibiHero(kind: hero, accent: accent, inverted: menuOpen, size: 30)
                 }
-                .frame(width: 36, height: 36)
+                .frame(width: 40, height: 40)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
@@ -335,6 +345,7 @@ private struct UserMenuDropdown: View {
     let onSignOut: () -> Void
     let onLoadComic: () -> Void
     @AppStorage("backendIP") private var backendIP: String = ""
+    private var library: LibraryStore { LibraryStore.shared }
     private let accent = ZapTheme.accent
 
     var body: some View {
@@ -389,15 +400,20 @@ private struct UserMenuDropdown: View {
 
                             Spacer()
 
-                            if let badge = r.badge, !active {
-                                Text(badge)
-                                    .font(ZapTheme.archivoBlack(10))
-                                    .kerning(0.3)
-                                    .foregroundStyle(tone.textDim)
-                                    .padding(.horizontal, 7)
-                                    .padding(.vertical, 2)
-                                    .background(tone.chipBg)
-                                    .clipShape(Capsule())
+                            if !active {
+                                let badgeText: String? = r == .library
+                                    ? (library.comics.isEmpty ? nil : "\(library.comics.count)")
+                                    : r.badge
+                                if let badge = badgeText {
+                                    Text(badge)
+                                        .font(ZapTheme.archivoBlack(10))
+                                        .kerning(0.3)
+                                        .foregroundStyle(tone.textDim)
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 2)
+                                        .background(tone.chipBg)
+                                        .clipShape(Capsule())
+                                }
                             }
 
                             if active {
@@ -543,15 +559,50 @@ private struct SubPageView: View {
                     .foregroundStyle(tone.text)
                     .textCase(.uppercase)
                     .kerning(-0.5)
-                Text(route.localSubtitle(s))
-                    .font(.system(size: 13))
-                    .foregroundStyle(tone.textDim)
+                if route == .library {
+                    let count = library.comics.count
+                    Text(count == 0
+                         ? "No comics downloaded yet"
+                         : "\(count) \(count == 1 ? "comic" : "comics") · \(library.totalSizeFormatted)")
+                        .font(.system(size: 13))
+                        .foregroundStyle(tone.textDim)
+                } else if route == .favourites {
+                    let count = library.comics.filter { library.isFavourite(id: $0.id) }.count
+                    Text(count == 0
+                         ? "Tap ♥ on any downloaded comic"
+                         : "\(count) \(count == 1 ? "comic" : "comics") saved")
+                        .font(.system(size: 13))
+                        .foregroundStyle(tone.textDim)
+                } else if route == .reading {
+                    let count = library.comics.filter {
+                        !library.isRead(id: $0.id) &&
+                        (library.readingProgress[$0.id]?.total ?? 0) > 0
+                    }.count
+                    Text(count == 0 ? "No comics in progress" : "\(count) in progress")
+                        .font(.system(size: 13))
+                        .foregroundStyle(tone.textDim)
+                } else if route == .read {
+                    let count = library.comics.filter { library.isRead(id: $0.id) }.count
+                    Text(count == 0 ? "No comics marked as read" : "\(count) \(count == 1 ? "comic" : "comics") finished")
+                        .font(.system(size: 13))
+                        .foregroundStyle(tone.textDim)
+                } else {
+                    Text(route.localSubtitle(s))
+                        .font(.system(size: 13))
+                        .foregroundStyle(tone.textDim)
+                }
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 20)
 
             if route == .library {
                 LibraryGridView(library: library, tone: tone, onOpen: onOpenLibraryComic)
+            } else if route == .favourites {
+                FavouritesView(library: library, tone: tone, onOpen: onOpenLibraryComic)
+            } else if route == .read {
+                ReadComicsView(library: library, tone: tone, onOpen: onOpenLibraryComic)
+            } else if route == .reading {
+                CurrentlyReadingView(library: library, tone: tone, onOpen: onOpenLibraryComic)
             } else if mockComics.isEmpty {
                 Text(s.nothingHere)
                     .font(.system(size: 14))
@@ -683,6 +734,258 @@ private struct PublisherChips: View {
     }
 }
 
+// MARK: - Featured reading card (tiled brick backdrop + dominant-colour glow)
+private struct FeaturedReadingCard: View {
+    let comic: LibraryComic
+    let library: LibraryStore
+    let tone: ZapTheme.Tone
+    let onOpen: () -> Void
+
+    // Image loaded once — avoids repeated synchronous disk reads during render
+    @State private var cover:     UIImage? = nil
+    @State private var glowColor: Color   = ZapTheme.accent
+    @State private var rock       = false
+    @State private var glowPulse  = false
+    @State private var pulseDot   = false
+    @State private var shimmer    = false
+    @State private var tileDrift: CGFloat = 0
+
+    private let coverW: CGFloat = 148
+    private let coverH: CGFloat = 207
+    private let cardW:  CGFloat = UIScreen.main.bounds.width - 40
+    private let tW:     CGFloat = 64   // tile cell width
+    private let tH:     CGFloat = 90   // tile cell height (2:3 ≈ comic ratio)
+    private let tGap:   CGFloat = 6
+
+    private var prog: LocalReadingProgress? { library.readingProgress[comic.id] }
+    private var pct: CGFloat {
+        guard let p = prog, p.total > 0 else { return 0 }
+        return min(1, CGFloat(p.page + 1) / CGFloat(p.total))
+    }
+
+    var body: some View {
+        // Background layers — no interaction, no text
+        ZStack {
+            // 1 ── Tiled brick-pattern backdrop (cover repeating, drifting)
+            if let img = cover { tileGrid(img) }
+            else { Color(hex: "#0d0d18") }
+
+            // 2 ── Colour-bloom wash (same cover, blurred + saturated)
+            if let img = cover {
+                Image(uiImage: img)
+                    .resizable().aspectRatio(contentMode: .fill)
+                    .blur(radius: 36).saturation(1.8).opacity(0.28)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
+            }
+
+            // 3 ── Dark scrim
+            Color.black.opacity(0.52).allowsHitTesting(false)
+
+            // 4 ── Featured cover (right) — .fit so small images never distort
+            if let img = cover {
+                Image(uiImage: img)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: coverW, height: coverH)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                    .rotationEffect(.degrees(rock ? 1.2 : -1.2))
+                    .shadow(color: glowColor.opacity(glowPulse ? 0.95 : 0.50),
+                            radius: glowPulse ? 30 : 16)
+                    .shadow(color: .black.opacity(0.55), radius: 8, x: 2, y: 6)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    .padding(.trailing, 20).padding(.bottom, 22)
+                    .allowsHitTesting(false)
+            }
+
+            // 5 ── Bottom gradient (makes left-side text legible)
+            LinearGradient(
+                stops: [
+                    .init(color: .clear,               location: 0.00),
+                    .init(color: .black.opacity(0.22),  location: 0.32),
+                    .init(color: .black.opacity(0.88),  location: 0.66),
+                    .init(color: .black.opacity(0.97),  location: 1.00)
+                ],
+                startPoint: .top, endPoint: .bottom
+            )
+            .allowsHitTesting(false)
+
+            // 6 ── Shimmer ray (fires via .task loop every ~5 s)
+            Rectangle()
+                .fill(LinearGradient(
+                    colors: [.clear, .white.opacity(0.07), .white.opacity(0.17),
+                             .white.opacity(0.07), .clear],
+                    startPoint: .leading, endPoint: .trailing
+                ))
+                .frame(width: 110).rotationEffect(.degrees(22))
+                .offset(x: shimmer ? cardW + 150 : -(cardW + 110))
+                .allowsHitTesting(false)
+        }
+        .frame(height: 260)
+        // Content overlay — always on top of all background layers
+        .overlay(alignment: .topLeading) {
+            // TOP — live badge
+            HStack(spacing: 6) {
+                Circle().fill(glowColor).frame(width: 6, height: 6)
+                    .opacity(pulseDot ? 0.28 : 1.0)
+                    .scaleEffect(pulseDot ? 0.58 : 1.0)
+                Text("CONTINUE WHERE YOU LEFT OFF")
+                    .font(ZapTheme.archivoBlack(12)).kerning(0.8)
+                    .foregroundStyle(.white)
+            }
+            .padding(18)
+            .allowsHitTesting(false)
+        }
+        .overlay(alignment: .bottomLeading) {
+            // BOTTOM — publisher · title · progress · RESUME button
+            VStack(alignment: .leading, spacing: 6) {
+                if let pub = comic.publisher {
+                    Text(pub.uppercased())
+                        .font(.system(size: 11, weight: .black)).kerning(0.5)
+                        .foregroundStyle(glowColor)
+                }
+                Text(comic.title)
+                    .font(ZapTheme.archivoBlack(22))
+                    .foregroundStyle(.white)
+                    .textCase(.uppercase).kerning(-0.6).lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .shadow(color: .black.opacity(0.7), radius: 0, x: 0, y: 2)
+
+                if let p = prog, p.total > 0 {
+                    VStack(alignment: .leading, spacing: 5) {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 2).fill(.white.opacity(0.18))
+                                RoundedRectangle(cornerRadius: 2).fill(glowColor)
+                                    .shadow(color: glowColor, radius: 5)
+                                    .frame(width: geo.size.width * pct)
+                            }
+                        }
+                        .frame(height: 4)
+                        Text("Page \(p.page + 1) of \(p.total)  ·  \(Int(pct * 100))%")
+                            .font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.55))
+                        Button(action: onOpen) {
+                            HStack(spacing: 5) {
+                                Image(systemName: "play.fill").font(.system(size: 9, weight: .bold))
+                                Text("RESUME").font(ZapTheme.archivoBlack(10)).kerning(0.5)
+                            }
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 14).padding(.vertical, 9)
+                            .background(.white)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .shadow(color: .white.opacity(0.3), radius: 8)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(18)
+            .frame(maxWidth: cardW * 0.57, alignment: .leading)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 22))
+        .shadow(color: glowColor.opacity(glowPulse ? 0.72 : 0.30),
+                radius: glowPulse ? 34 : 18, x: 0, y: 10)
+        .shadow(color: .black.opacity(0.55), radius: 14, x: 0, y: 5)
+        .padding(.horizontal, 20).padding(.top, 14)
+        .onAppear {
+            // Load image synchronously (small thumbnail on disk — fast)
+            cover = library.coverImage(for: comic)
+            if let img = cover {
+                Task.detached(priority: .utility) {
+                    let c = extractDominantColor(from: img)
+                    await MainActor.run { glowColor = c }
+                }
+            }
+            // Animations
+            withAnimation(.easeInOut(duration: 6.5).repeatForever(autoreverses: true))  { rock      = true }
+            withAnimation(.easeInOut(duration: 2.6).repeatForever(autoreverses: true))  { glowPulse = true }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true))  { pulseDot  = true }
+            // Tile drift: moves exactly one tile width → seamless loop
+            withAnimation(.linear(duration: 14.0).repeatForever(autoreverses: false))   { tileDrift = -(tW + tGap) }
+        }
+        .task {
+            try? await Task.sleep(for: .seconds(1.8))
+            while !Task.isCancelled {
+                withAnimation(.easeInOut(duration: 0.78)) { shimmer = true }
+                try? await Task.sleep(for: .milliseconds(950))
+                shimmer = false
+                try? await Task.sleep(for: .seconds(4.3))
+            }
+        }
+    }
+
+    // Diagonal brick-pattern tiling — 10 cols × 6 rows, edge-to-edge coverage.
+    // Gradient mask: fully invisible on the left, fully opaque on the right.
+    @ViewBuilder
+    private func tileGrid(_ img: UIImage) -> some View {
+        HStack(alignment: .top, spacing: tGap) {
+            ForEach(0..<10, id: \.self) { col in
+                VStack(spacing: tGap) {
+                    ForEach(0..<6, id: \.self) { _ in
+                        Image(uiImage: img)
+                            .resizable()
+                            .interpolation(.medium)
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: tW, height: tH)
+                            .clipShape(RoundedRectangle(cornerRadius: 5))
+                    }
+                }
+                .offset(y: col.isMultiple(of: 2) ? 0 : (tH + tGap) / 2)
+            }
+        }
+        .offset(x: tileDrift)
+        .rotationEffect(.degrees(-10), anchor: .center)
+        .opacity(0.68)
+        .mask(
+            LinearGradient(
+                stops: [
+                    .init(color: .clear,               location: 0.00),
+                    .init(color: .black.opacity(0.55),  location: 0.07),
+                    .init(color: .black.opacity(0.88),  location: 0.16),
+                    .init(color: .black,               location: 0.26),
+                    .init(color: .black,               location: 1.00)
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        )
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .clipped()
+    }
+}
+
+// Samples a 50×50 downsample of the image, skips near-black/white/grey pixels,
+// buckets remaining colours and returns the most frequent saturated one.
+private func extractDominantColor(from image: UIImage) -> Color {
+    guard let cg = image.cgImage else { return ZapTheme.accent }
+    let side = 50
+    var px = [UInt8](repeating: 0, count: side * side * 4)
+    guard let ctx = CGContext(data: &px, width: side, height: side,
+                              bitsPerComponent: 8, bytesPerRow: side * 4,
+                              space: CGColorSpaceCreateDeviceRGB(),
+                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+        return ZapTheme.accent
+    }
+    ctx.draw(cg, in: CGRect(x: 0, y: 0, width: side, height: side))
+
+    var buckets: [UInt32: (n: Int, r: Int, g: Int, b: Int)] = [:]
+    for i in stride(from: 0, to: px.count, by: 4) {
+        let r = Int(px[i]), g = Int(px[i+1]), b = Int(px[i+2]), a = Int(px[i+3])
+        guard a > 128 else { continue }
+        let hi = max(r, g, b), lo = min(r, g, b)
+        let brightness  = Double(hi) / 255
+        let saturation  = hi > 0 ? Double(hi - lo) / Double(hi) : 0
+        guard brightness > 0.15 && brightness < 0.88 && saturation > 0.22 else { continue }
+        // 5-bit quantise per channel → 32 768 possible buckets
+        let key = (UInt32(r >> 3) << 10) | (UInt32(g >> 3) << 5) | UInt32(b >> 3)
+        if let e = buckets[key] { buckets[key] = (e.n+1, e.r+r, e.g+g, e.b+b) }
+        else                    { buckets[key] = (1, r, g, b) }
+    }
+    guard let top = buckets.values.max(by: { $0.n < $1.n }), top.n > 0 else { return ZapTheme.accent }
+    let n = Double(top.n)
+    return Color(red: Double(top.r)/n/255, green: Double(top.g)/n/255, blue: Double(top.b)/n/255)
+}
+
 // MARK: - Featured hero card
 private struct FeaturedHeroCard: View {
     let comic: MockComic
@@ -802,6 +1105,128 @@ private struct ContinueReadingRow: View {
                     }
                 }
             }.padding(.horizontal, 20)
+        }
+    }
+}
+
+// MARK: - Real continue reading row (live library data)
+private struct RealContinueReadingRow: View {
+    let library: LibraryStore
+    let tone: ZapTheme.Tone
+    var onOpen: (LibraryComic) -> Void = { _ in }
+    private let accent = ZapTheme.accent
+    private let cardW: CGFloat = 110
+    private let cardH: CGFloat = 154
+
+    private var inProgress: [LibraryComic] {
+        library.comics
+            .filter { !library.isRead(id: $0.id) && (library.readingProgress[$0.id]?.total ?? 0) > 0 }
+            .sorted {
+                (library.readingProgress[$0.id]?.lastReadAt ?? .distantPast) >
+                (library.readingProgress[$1.id]?.lastReadAt ?? .distantPast)
+            }
+    }
+
+    var body: some View {
+        if inProgress.isEmpty {
+            HStack(spacing: 10) {
+                Image(systemName: "book").font(.system(size: 16)).foregroundStyle(tone.textMuted)
+                Text("Open any downloaded comic to start reading.")
+                    .font(.system(size: 12)).foregroundStyle(tone.textMuted).lineSpacing(2)
+            }
+            .padding(.horizontal, 20).padding(.vertical, 10)
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 12) {
+                    ForEach(inProgress) { comic in
+                        VStack(alignment: .leading, spacing: 5) {
+                            Button { onOpen(comic) } label: {
+                                ZStack(alignment: .bottom) {
+                                    Group {
+                                        if let img = library.coverImage(for: comic) {
+                                            Image(uiImage: img).resizable().aspectRatio(contentMode: .fill)
+                                        } else {
+                                            LinearGradient(colors: [Color(hex: "#1c1c2e"), Color(hex: "#0a0a14")],
+                                                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                                            .overlay(Image(systemName: "book.closed")
+                                                .font(.system(size: 20)).foregroundStyle(.white.opacity(0.12)))
+                                        }
+                                    }
+                                    .frame(width: cardW, height: cardH).clipped()
+
+                                    LinearGradient(
+                                        stops: [.init(color: .clear, location: 0.38),
+                                                .init(color: .black.opacity(0.9), location: 1.0)],
+                                        startPoint: .top, endPoint: .bottom
+                                    )
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        if let pub = comic.publisher {
+                                            Text(pub.uppercased())
+                                                .font(.system(size: 7, weight: .black)).kerning(0.4)
+                                                .foregroundStyle(accent).lineLimit(1)
+                                        }
+                                        Text(comic.title)
+                                            .font(.system(size: 9, weight: .black))
+                                            .foregroundStyle(.white).lineLimit(2)
+
+                                        if let prog = library.readingProgress[comic.id], prog.total > 0 {
+                                            let pct = min(1.0, CGFloat(prog.page + 1) / CGFloat(prog.total))
+                                            HStack(spacing: 4) {
+                                                GeometryReader { geo in
+                                                    ZStack(alignment: .leading) {
+                                                        Capsule().fill(Color.white.opacity(0.2))
+                                                        Capsule().fill(accent).frame(width: geo.size.width * pct)
+                                                    }
+                                                }
+                                                .frame(height: 2.5)
+                                                Text("\(Int(pct * 100))%")
+                                                    .font(.system(size: 7, weight: .bold))
+                                                    .foregroundStyle(.white.opacity(0.7)).fixedSize()
+                                            }
+                                            .padding(.top, 1)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 7).padding(.bottom, 7)
+                                }
+                                .frame(width: cardW, height: cardH)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .shadow(color: .black.opacity(0.35), radius: 5, x: 0, y: 3)
+                            }
+                            .buttonStyle(.plain)
+
+                            if let date = library.readingProgress[comic.id]?.lastReadAt {
+                                Text(relativeTime(date))
+                                    .font(.system(size: 9.5, weight: .medium))
+                                    .foregroundStyle(tone.textMuted)
+                                    .frame(width: cardW, alignment: .leading)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+        }
+    }
+
+    private func relativeTime(_ date: Date) -> String {
+        let days = Date().timeIntervalSince(date) / 86400
+        switch days {
+        case ..<0.5:   return "Just now"
+        case ..<1:     return "Today"
+        case ..<2:     return "1 day ago"
+        case ..<7:     return "\(Int(days)) days ago"
+        case ..<14:    return "1 week ago"
+        case ..<21:    return "2 weeks ago"
+        case ..<30:    return "3 weeks ago"
+        case ..<60:    return "1 month ago"
+        case ..<90:    return "2 months ago"
+        case ..<180:   return "3 months ago"
+        case ..<270:   return "6 months ago"
+        case ..<365:   return "9 months ago"
+        case ..<730:   return "1 year ago"
+        default:       return "Over 1 year ago"
         }
     }
 }
@@ -1355,6 +1780,241 @@ private struct BrowseComicCard: View {
     }
 }
 
+// MARK: - Favourites (grouped by publisher)
+private struct FavouritesView: View {
+    let library: LibraryStore
+    let tone: ZapTheme.Tone
+    var onOpen: (LibraryComic) -> Void = { _ in }
+    private let accent = ZapTheme.accent
+    private let colW: CGFloat = (UIScreen.main.bounds.width - 40 - 24) / 3
+    @State private var comicToDelete: LibraryComic? = nil
+
+    private var favourites: [LibraryComic] {
+        library.comics.filter { library.isFavourite(id: $0.id) }
+    }
+
+    private var grouped: [(label: String, color: Color, comics: [LibraryComic])] {
+        let knownSlugs = ["dc", "marvel"]
+        var result: [(String, Color, [LibraryComic])] = []
+        for slug in knownSlugs {
+            let group = favourites.filter { $0.publisher?.lowercased().contains(slug) == true }
+            if !group.isEmpty { result.append((slug.uppercased(), pubColor(slug), group)) }
+        }
+        let other = favourites.filter { c in
+            guard let p = c.publisher?.lowercased() else { return true }
+            return !knownSlugs.contains(where: { p.contains($0) })
+        }
+        if !other.isEmpty { result.append(("Other", accent, other)) }
+        return result
+    }
+
+    private let cardW: CGFloat = 160
+    private let cardH: CGFloat = 224
+
+    var body: some View {
+        if favourites.isEmpty {
+            VStack(spacing: 16) {
+                Image(systemName: "heart")
+                    .font(.system(size: 44))
+                    .foregroundStyle(accent.opacity(0.3))
+                Text("NO FAVOURITES YET")
+                    .font(ZapTheme.archivoBlack(15))
+                    .foregroundStyle(tone.text)
+                Text("Tap the ♥ on any downloaded comic\nto save it here.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(tone.textDim)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(4)
+            }
+            .frame(maxWidth: .infinity).padding(.top, 80).padding(.horizontal, 40)
+        } else {
+            VStack(alignment: .leading, spacing: 32) {
+                ForEach(grouped, id: \.label) { section in
+                    VStack(alignment: .leading, spacing: 14) {
+                        // Section header
+                        HStack(alignment: .center, spacing: 10) {
+                            // Coloured left bar
+                            RoundedRectangle(cornerRadius: 2)
+                                .fill(section.color)
+                                .frame(width: 3, height: 18)
+
+                            Text(section.label)
+                                .font(ZapTheme.archivoBlack(15))
+                                .kerning(-0.3)
+                                .foregroundStyle(tone.text)
+
+                            Text("\(section.comics.count)")
+                                .font(ZapTheme.archivoBlack(10))
+                                .foregroundStyle(section.color)
+                                .padding(.horizontal, 7).padding(.vertical, 3)
+                                .background(section.color.opacity(0.15))
+                                .clipShape(Capsule())
+
+                            Spacer()
+                        }
+                        .padding(.horizontal, 20)
+
+                        // Horizontal scroll of taller cards
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 12) {
+                                ForEach(section.comics) { comic in
+                                    FavouriteCard(
+                                        comic: comic, library: library,
+                                        width: cardW, height: cardH,
+                                        accentColor: section.color,
+                                        tone: tone,
+                                        onOpen: { onOpen(comic) },
+                                        onDelete: { comicToDelete = comic },
+                                        onToggleRead: { library.toggleRead(id: comic.id) }
+                                    )
+                                }
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+            }
+            .alert("Delete this comic?", isPresented: .init(
+                get: { comicToDelete != nil },
+                set: { if !$0 { comicToDelete = nil } }
+            )) {
+                Button("Delete", role: .destructive) {
+                    if let c = comicToDelete { library.delete(c) }
+                    comicToDelete = nil
+                }
+                Button("Cancel", role: .cancel) { comicToDelete = nil }
+            } message: {
+                Text("The CBZ file and cover will be removed from your library.")
+            }
+        }
+    }
+
+    private func pubColor(_ slug: String) -> Color {
+        switch slug {
+        case "dc":     return Color(hex: "#0476F2")
+        case "marvel": return Color(hex: "#E2231A")
+        default:       return accent
+        }
+    }
+}
+
+// MARK: - Favourite card (horizontal scroll item)
+private struct FavouriteCard: View {
+    let comic: LibraryComic
+    let library: LibraryStore
+    let width: CGFloat
+    let height: CGFloat
+    let accentColor: Color
+    let tone: ZapTheme.Tone
+    var onOpen: () -> Void = {}
+    var onDelete: () -> Void = {}
+    var onToggleRead: () -> Void = {}
+
+    private var isFav: Bool { library.isFavourite(id: comic.id) }
+    private var isRead: Bool { library.isRead(id: comic.id) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Cover
+            ZStack(alignment: .topTrailing) {
+                Button { onOpen() } label: {
+                    ZStack(alignment: .bottom) {
+                        Group {
+                            if let img = library.coverImage(for: comic) {
+                                Image(uiImage: img).resizable().aspectRatio(contentMode: .fill)
+                            } else {
+                                LinearGradient(colors: [Color(hex: "#1c1c2e"), Color(hex: "#0a0a14")],
+                                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                                .overlay(Image(systemName: "book.closed")
+                                    .font(.system(size: 28)).foregroundStyle(.white.opacity(0.12)))
+                            }
+                        }
+                        .frame(width: width, height: height).clipped()
+
+                        // Bottom gradient + title
+                        LinearGradient(
+                            stops: [.init(color: .clear, location: 0.45),
+                                    .init(color: .black.opacity(0.85), location: 1.0)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                        VStack(alignment: .leading, spacing: 3) {
+                            if let pub = comic.publisher {
+                                Text(pub.uppercased())
+                                    .font(.system(size: 9, weight: .black))
+                                    .foregroundStyle(accentColor)
+                                    .lineLimit(1)
+                            }
+                            Text(comic.title)
+                                .font(.system(size: 12, weight: .black))
+                                .foregroundStyle(.white)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.leading)
+
+                            if let prog = library.readingProgress[comic.id], prog.total > 0 {
+                                let pct = min(1.0, CGFloat(prog.page + 1) / CGFloat(prog.total))
+                                HStack(spacing: 6) {
+                                    GeometryReader { geo in
+                                        ZStack(alignment: .leading) {
+                                            Capsule().fill(Color.white.opacity(0.2))
+                                            Capsule().fill(accentColor).frame(width: geo.size.width * pct)
+                                        }
+                                    }
+                                    .frame(height: 3)
+                                    Text("\(prog.page + 1)/\(prog.total)")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundStyle(.white.opacity(0.75))
+                                        .fixedSize()
+                                }
+                                .padding(.top, 2)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10).padding(.bottom, 10)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                // Heart
+                Button { library.toggleFavourite(id: comic.id) } label: {
+                    Image(systemName: isFav ? "heart.fill" : "heart")
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundStyle(isFav ? ZapTheme.accent : ZapTheme.accent.opacity(0.7))
+                        .padding(8)
+                        .background(.black.opacity(0.55))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+                .padding(6)
+            }
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .shadow(color: accentColor.opacity(0.25), radius: 8, x: 0, y: 4)
+
+            // Dots menu below
+            HStack {
+                Spacer(minLength: 0)
+                Menu {
+                    Button { onOpen() } label: { Label("Read", systemImage: "book") }
+                    Button { onToggleRead() } label: {
+                        Label(isRead ? "Mark as Unread" : "Mark as Read",
+                              systemImage: isRead ? "circle" : "checkmark.circle")
+                    }
+                    Button(role: .destructive) { onDelete() } label: { Label("Delete", systemImage: "trash") }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(tone.textDim)
+                        .frame(width: 40, height: 32)
+                        .contentShape(Rectangle())
+                }
+            }
+            .frame(width: width)
+        }
+        .frame(width: width)
+    }
+}
+
 // MARK: - Library grid (full-page library sub-view)
 private struct LibraryGridView: View {
     let library: LibraryStore
@@ -1362,6 +2022,7 @@ private struct LibraryGridView: View {
     var onOpen: (LibraryComic) -> Void = { _ in }
     private let accent = ZapTheme.accent
     private let colW: CGFloat = (UIScreen.main.bounds.width - 40 - 24) / 3
+    @State private var comicToDelete: LibraryComic? = nil
 
     var body: some View {
         if library.comics.isEmpty {
@@ -1379,13 +2040,28 @@ private struct LibraryGridView: View {
             let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
             LazyVGrid(columns: columns, spacing: 16) {
                 ForEach(library.comics) { comic in
-                    Button { onOpen(comic) } label: {
-                        LibraryComicCard(comic: comic, library: library,
-                                         width: colW, height: colW * 1.4, accent: accent, tone: tone)
-                    }.buttonStyle(.plain)
+                    LibraryComicCard(
+                        comic: comic, library: library,
+                        width: colW, height: colW * 1.25, accent: accent, tone: tone,
+                        onOpen: { onOpen(comic) },
+                        onDelete: { comicToDelete = comic },
+                        onToggleRead: { library.toggleRead(id: comic.id) }
+                    )
                 }
             }
             .padding(.horizontal, 20)
+            .alert("Delete this comic?", isPresented: .init(
+                get: { comicToDelete != nil },
+                set: { if !$0 { comicToDelete = nil } }
+            )) {
+                Button("Delete", role: .destructive) {
+                    if let c = comicToDelete { library.delete(c) }
+                    comicToDelete = nil
+                }
+                Button("Cancel", role: .cancel) { comicToDelete = nil }
+            } message: {
+                Text("The CBZ file and cover will be removed from your library.")
+            }
         }
     }
 }
@@ -1397,43 +2073,314 @@ private struct LibraryComicCard: View {
     let height: CGFloat
     let accent: Color
     let tone: ZapTheme.Tone
+    var onOpen: () -> Void = {}
+    var onDelete: () -> Void = {}
+    var onToggleRead: () -> Void = {}
+
+    private var isFav: Bool { library.isFavourite(id: comic.id) }
+    private var isRead: Bool { library.isRead(id: comic.id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ZStack(alignment: .bottom) {
-                Group {
+            ZStack(alignment: .topTrailing) {
+                Button { onOpen() } label: {
+                    ZStack(alignment: .bottom) {
+                        Group {
+                            if let img = library.coverImage(for: comic) {
+                                Image(uiImage: img).resizable().aspectRatio(contentMode: .fill)
+                            } else {
+                                LinearGradient(colors: [Color(hex: "#1c1c2e"), Color(hex: "#0a0a14")],
+                                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                                .overlay(Image(systemName: "book.closed")
+                                    .font(.system(size: 18)).foregroundStyle(.white.opacity(0.12)))
+                            }
+                        }
+                        .frame(width: width, height: height).clipped()
+
+                        // Gradient overlay with title + progress
+                        LinearGradient(
+                            stops: [.init(color: .clear, location: 0.4),
+                                    .init(color: .black.opacity(0.88), location: 1.0)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                        VStack(alignment: .leading, spacing: 2) {
+                            if let pub = comic.publisher {
+                                Text(pub.uppercased())
+                                    .font(.system(size: 7, weight: .black))
+                                    .foregroundStyle(accent).lineLimit(1)
+                            }
+                            Text(comic.title)
+                                .font(.system(size: 9, weight: .black))
+                                .foregroundStyle(.white).lineLimit(2)
+
+                            if let prog = library.readingProgress[comic.id], prog.total > 0 {
+                                let pct = min(1.0, CGFloat(prog.page + 1) / CGFloat(prog.total))
+                                HStack(spacing: 4) {
+                                    GeometryReader { geo in
+                                        ZStack(alignment: .leading) {
+                                            Capsule().fill(Color.white.opacity(0.2))
+                                            Capsule().fill(accent).frame(width: geo.size.width * pct)
+                                        }
+                                    }
+                                    .frame(height: 2.5)
+                                    Text("\(prog.page + 1)/\(prog.total)")
+                                        .font(.system(size: 7, weight: .bold))
+                                        .foregroundStyle(.white.opacity(0.7))
+                                        .fixedSize()
+                                }
+                                .padding(.top, 1)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 7).padding(.bottom, 7)
+                    }
+                }
+                .buttonStyle(.plain)
+
+                Button { library.toggleFavourite(id: comic.id) } label: {
+                    Image(systemName: isFav ? "heart.fill" : "heart")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(isFav ? accent : accent.opacity(0.7))
+                        .padding(7)
+                        .background(.black.opacity(0.55))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+                .padding(5)
+            }
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .shadow(color: .black.opacity(0.35), radius: 5, x: 0, y: 3)
+
+            HStack {
+                Spacer(minLength: 0)
+                Menu {
+                    Button { onOpen() } label: { Label("Read", systemImage: "book") }
+                    Button { onToggleRead() } label: {
+                        Label(isRead ? "Mark as Unread" : "Mark as Read",
+                              systemImage: isRead ? "circle" : "checkmark.circle")
+                    }
+                    Button(role: .destructive) { onDelete() } label: { Label("Delete", systemImage: "trash") }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(tone.textDim)
+                        .frame(width: 36, height: 28)
+                        .contentShape(Rectangle())
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Currently Reading view
+private struct CurrentlyReadingView: View {
+    let library: LibraryStore
+    let tone: ZapTheme.Tone
+    var onOpen: (LibraryComic) -> Void = { _ in }
+    private let accent = ZapTheme.accent
+
+    private var inProgress: [LibraryComic] {
+        library.comics.filter { comic in
+            guard !library.isRead(id: comic.id) else { return false }
+            guard let prog = library.readingProgress[comic.id] else { return false }
+            return prog.total > 0
+        }
+        .sorted {
+            let a = library.readingProgress[$0.id]?.lastReadAt ?? .distantPast
+            let b = library.readingProgress[$1.id]?.lastReadAt ?? .distantPast
+            return a > b
+        }
+    }
+
+    var body: some View {
+        if inProgress.isEmpty {
+            VStack(spacing: 16) {
+                Image(systemName: "book")
+                    .font(.system(size: 44))
+                    .foregroundStyle(accent.opacity(0.3))
+                Text("NOTHING IN PROGRESS")
+                    .font(ZapTheme.archivoBlack(15))
+                    .foregroundStyle(tone.text)
+                Text("Open a downloaded comic to start reading.\nIt'll appear here automatically.")
+                    .font(.system(size: 13))
+                    .foregroundStyle(tone.textDim)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(4)
+            }
+            .frame(maxWidth: .infinity).padding(.top, 80).padding(.horizontal, 40)
+        } else {
+            VStack(spacing: 12) {
+                ForEach(inProgress) { comic in
+                    CurrentlyReadingCard(comic: comic, library: library, tone: tone, accent: accent) {
+                        onOpen(comic)
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+}
+
+private struct CurrentlyReadingCard: View {
+    let comic: LibraryComic
+    let library: LibraryStore
+    let tone: ZapTheme.Tone
+    let accent: Color
+    let onOpen: () -> Void
+
+    private var prog: LocalReadingProgress? { library.readingProgress[comic.id] }
+
+    private var pct: CGFloat {
+        guard let p = prog, p.total > 0 else { return 0 }
+        return min(1, CGFloat(p.page + 1) / CGFloat(p.total))
+    }
+
+    private var lastReadLabel: String {
+        guard let date = prog?.lastReadAt else { return "" }
+        let cal = Calendar.current
+        if cal.isDateInToday(date)     { return "Today" }
+        if cal.isDateInYesterday(date) { return "Yesterday" }
+        let f = DateFormatter(); f.dateFormat = "MMM d"
+        return f.string(from: date)
+    }
+
+    var body: some View {
+        Button { onOpen() } label: {
+            HStack(spacing: 14) {
+                // Cover
+                ZStack {
                     if let img = library.coverImage(for: comic) {
                         Image(uiImage: img).resizable().aspectRatio(contentMode: .fill)
                     } else {
                         LinearGradient(colors: [Color(hex: "#1c1c2e"), Color(hex: "#0a0a14")],
                                        startPoint: .topLeading, endPoint: .bottomTrailing)
-                        .overlay(Image(systemName: "book.closed")
-                            .font(.system(size: 22)).foregroundStyle(.white.opacity(0.12)))
+                        Image(systemName: "book.closed")
+                            .font(.system(size: 20)).foregroundStyle(.white.opacity(0.15))
                     }
                 }
-                .frame(width: width, height: height).clipped()
+                .frame(width: 68, height: 96)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .shadow(color: .black.opacity(0.3), radius: 4, x: 0, y: 2)
 
-                VStack(alignment: .leading, spacing: 3) {
-                    if let pub = comic.publisher {
-                        Text(pub.uppercased()).font(.system(size: 8, weight: .black))
-                            .foregroundStyle(accent).lineLimit(1)
+                // Info
+                VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let pub = comic.publisher {
+                            Text(pub.uppercased())
+                                .font(.system(size: 9, weight: .black)).kerning(0.4)
+                                .foregroundStyle(accent).lineLimit(1)
+                        }
+                        Text(comic.title)
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(tone.text)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
                     }
-                    Text(comic.title).font(.system(size: 7, weight: .heavy))
-                        .foregroundStyle(.white.opacity(0.9))
-                        .textCase(.uppercase).lineLimit(2)
+
+                    // Progress bar
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule().fill(tone.chipBg)
+                            Capsule().fill(accent)
+                                .frame(width: geo.size.width * pct)
+                                .animation(.easeInOut(duration: 0.3), value: pct)
+                        }
+                    }
+                    .frame(height: 4)
+
+                    // Stats row
+                    HStack(spacing: 8) {
+                        if let p = prog, p.total > 0 {
+                            Text("Page \(p.page + 1) of \(p.total)")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(tone.textDim)
+                            Text("·")
+                                .foregroundStyle(tone.textMuted)
+                            Text("\(Int(pct * 100))%")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(accent)
+                        }
+                        Spacer(minLength: 0)
+                        if !lastReadLabel.isEmpty {
+                            HStack(spacing: 3) {
+                                Image(systemName: "clock").font(.system(size: 9))
+                                Text(lastReadLabel).font(.system(size: 10))
+                            }
+                            .foregroundStyle(tone.textMuted)
+                        }
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-                .padding(.horizontal, 5).padding(.vertical, 5)
-                .background(Color(hex: "#0d0d14").opacity(0.95))
+
+                // Arrow
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(tone.textMuted)
             }
-            .frame(width: width, height: height)
-            .clipShape(RoundedRectangle(cornerRadius: 9))
-            .shadow(color: .black.opacity(0.4), radius: 5, x: 0, y: 3)
+            .padding(12)
+            .background(tone.card)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(tone.chipBorder, lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+    }
+}
 
-            Text(comic.title).font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(tone.text).lineLimit(1)
-            if let yr = comic.year {
-                Text(yr).font(.system(size: 9)).foregroundStyle(tone.textDim)
+// MARK: - Read Comics view
+private struct ReadComicsView: View {
+    let library: LibraryStore
+    let tone: ZapTheme.Tone
+    var onOpen: (LibraryComic) -> Void = { _ in }
+    private let accent = ZapTheme.accent
+    private let colW: CGFloat = (UIScreen.main.bounds.width - 40 - 24) / 3
+    @State private var comicToDelete: LibraryComic? = nil
+
+    private var readComics: [LibraryComic] {
+        library.comics.filter { library.isRead(id: $0.id) }
+    }
+
+    var body: some View {
+        if readComics.isEmpty {
+            VStack(spacing: 16) {
+                Image(systemName: "checkmark.circle")
+                    .font(.system(size: 44))
+                    .foregroundStyle(accent.opacity(0.3))
+                Text("NO READ COMICS YET")
+                    .font(ZapTheme.archivoBlack(15))
+                    .foregroundStyle(tone.text)
+                Text("Use the ··· menu on any comic\nand tap \"Mark as Read\".")
+                    .font(.system(size: 13))
+                    .foregroundStyle(tone.textDim)
+                    .multilineTextAlignment(.center)
+                    .lineSpacing(4)
+            }
+            .frame(maxWidth: .infinity).padding(.top, 80).padding(.horizontal, 40)
+        } else {
+            let columns = Array(repeating: GridItem(.flexible(), spacing: 12), count: 3)
+            LazyVGrid(columns: columns, spacing: 16) {
+                ForEach(readComics) { comic in
+                    LibraryComicCard(
+                        comic: comic, library: library,
+                        width: colW, height: colW * 1.25, accent: accent, tone: tone,
+                        onOpen: { onOpen(comic) },
+                        onDelete: { comicToDelete = comic },
+                        onToggleRead: { library.toggleRead(id: comic.id) }
+                    )
+                }
+            }
+            .padding(.horizontal, 20)
+            .alert("Delete this comic?", isPresented: .init(
+                get: { comicToDelete != nil },
+                set: { if !$0 { comicToDelete = nil } }
+            )) {
+                Button("Delete", role: .destructive) {
+                    if let c = comicToDelete { library.delete(c) }
+                    comicToDelete = nil
+                }
+                Button("Cancel", role: .cancel) { comicToDelete = nil }
+            } message: {
+                Text("The CBZ file and cover will be removed from your library.")
             }
         }
     }

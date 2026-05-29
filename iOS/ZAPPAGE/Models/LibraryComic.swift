@@ -1,5 +1,11 @@
 import Foundation
 
+struct LocalReadingProgress: Codable {
+    var page: Int
+    var total: Int
+    var lastReadAt: Date?
+}
+
 struct LibraryComic: Identifiable, Codable, Hashable {
     let id: String
     let title: String

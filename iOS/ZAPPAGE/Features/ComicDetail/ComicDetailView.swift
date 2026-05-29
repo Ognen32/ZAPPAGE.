@@ -18,8 +18,12 @@ struct ComicDetailView: View {
     @State private var isLoadingDetail = true
     @State private var isFavourite = false
     @State private var downloadState: DownloadState = .idle
+    @State private var cbzPages: [CBZPage] = []
+    @State private var showReader = false
+    @State private var showDeleteConfirm = false
     private let accent = ZapTheme.accent
     private var library: LibraryStore { LibraryStore.shared }
+    private var savedComic: LibraryComic? { library.comics.first { $0.sourceURL == comic.url } }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -36,6 +40,18 @@ struct ComicDetailView: View {
 
             // Back button pinned over the hero
             backButton
+        }
+        .fullScreenCover(isPresented: $showReader) {
+            CBZReaderView(pages: cbzPages, comicID: savedComic?.id ?? "")
+        }
+        .alert("Delete this comic?", isPresented: $showDeleteConfirm) {
+            Button("Delete", role: .destructive) {
+                if let saved = savedComic { library.delete(saved) }
+                downloadState = .idle
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The CBZ file and cover will be removed from your library.")
         }
         .task {
             async let img   = loadCover()
@@ -140,13 +156,24 @@ struct ComicDetailView: View {
                     .frame(width: 36, height: 36)
                     .background(.black.opacity(0.48))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(.white.opacity(0.15), lineWidth: 0.5)
-                    )
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.15), lineWidth: 0.5))
             }
             .buttonStyle(.plain)
+
             Spacer()
+
+            if savedComic != nil {
+                Button { showDeleteConfirm = true } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(.black.opacity(0.48))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.white.opacity(0.15), lineWidth: 0.5))
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.top, 56)
@@ -259,14 +286,17 @@ struct ComicDetailView: View {
                 RoundedRectangle(cornerRadius: 12).fill(tone.chipBg).frame(height: 52)
 
             } else if downloadState == .done || library.isDownloaded(sourceURL: comic.url) {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill").font(.system(size: 14, weight: .bold))
-                    Text("DOWNLOADED").font(ZapTheme.archivoBlack(12)).kerning(0.4)
-                }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity).frame(height: 52)
-                .background(Color(hex: "#3DD68C"))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                Button { openReader() } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "book.fill").font(.system(size: 14, weight: .bold))
+                        Text("READ COMIC").font(ZapTheme.archivoBlack(12)).kerning(0.4)
+                    }
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity).frame(height: 52)
+                    .background(accent)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: accent.opacity(0.45), radius: 14, x: 0, y: 5)
+                }.buttonStyle(.plain)
 
             } else if case .downloading(let p) = downloadState {
                 VStack(spacing: 6) {
@@ -355,6 +385,15 @@ struct ComicDetailView: View {
                 print("[iOS] Download error: \(error)")
                 await MainActor.run { downloadState = .failed(error.localizedDescription) }
             }
+        }
+    }
+
+    private func openReader() {
+        guard let saved = savedComic else { return }
+        let url = LibraryStore.shared.cbzURL(for: saved)
+        Task.detached(priority: .userInitiated) {
+            guard let pages = try? loadCBZPages(from: url), !pages.isEmpty else { return }
+            await MainActor.run { cbzPages = pages; showReader = true }
         }
     }
 
